@@ -1,0 +1,15 @@
+models: [bench_initialize, bench_compute, bench_export]
+multiprocess_steps:
+- name: mp_initialize
+  begin: bench_initialize
+- name: mp_households
+  begin: bench_compute
+  num_processes: 20
+  slice:
+    tables: [households]
+- name: mp_finalize
+  begin: bench_export
+input_table_list:
+- tablename: households
+  filename: households.csv
+  index_col: household_id

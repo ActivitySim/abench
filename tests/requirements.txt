@@ -1,0 +1,6 @@
+# The measurement hook uses ActivitySim/Numba internals; pin real implementations
+# in CI so unrelated upstream changes do not silently change the test contract.
+activitysim @ git+https://github.com/ActivitySim/activitysim.git@5c6fae24a91a57a2d6dfc2e1dbe062a61d94545a
+sharrow @ git+https://github.com/ActivitySim/sharrow.git@fc175b27d8e0c5d202721c67d96b050e6117b235
+multimethod<2
+pandas<3

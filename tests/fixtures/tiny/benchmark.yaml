@@ -1,0 +1,20 @@
+schema_version: 1
+name: CI extension model
+configs: [configs]
+snapshot: [configs, tiny_extension.py]
+extensions: [tiny_extension]
+data_dir: data
+required_inputs: [households.csv]
+settings:
+  models: [bench_initialize, bench_compute, bench_export]
+  checkpoints: true
+  rng_base_seed: 0
+  chunk_size: 0
+  trace_hh_id: null
+  trace_od: null
+constraints: ['pandas<3', 'multimethod<2']
+input_tables:
+  households: {}
+output_tables:
+  households: {}
+adapter: tiny_extension:prepare

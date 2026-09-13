@@ -1,0 +1,209 @@
+# abench
+
+Run reproducible ActivitySim runtime and memory experiments in Linux Docker,
+from macOS or Linux. One runner supports MTC, SANDAG ABM3, and other models through
+small YAML profiles. ActivitySim itself does not need to be installed on the host.
+
+```bash
+python -m pip install /path/to/abench
+abench run --model-dir /path/to/sandag-abm3-example --profile sandag \
+  --source activitysim=ActivitySim/activitysim@<full-40-character-SHA> \
+  --source sharrow=ActivitySim/sharrow@<full-40-character-SHA> \
+  --multiprocess --processes 4 --sharrow --households 28365 \
+  --memory 32g --shm-size 8g --output-dir /path/to/experiments/sandag
+```
+
+Use `--profile mtc` for MTC; both profiles ship with the package. SANDAG defaults
+to its small `benchmarking-data`, **not full-scale skims**. MTC defaults to
+`data_full`. `--data-dir` overrides either. Model directories need not be Git
+repositories; Git revision/status are recorded where available and model files
+are always snapshotted. Existing example scripts and normal configs are untouched.
+
+The host needs Python 3.10+, PyYAML (installed with abench), and a Linux Docker
+engine with cgroup v2 and `memory.peak`. Docker Desktop must have enough VM RAM
+for the chosen memory limit plus VM overhead. The default container is Debian
+Bookworm/Python 3.11. Current instrumentation requires ActivitySim's
+`workflow.State` API (1.4-era or newer); arbitrary historical revisions are not
+promised to work. Build/runtime failures retain diagnostics and a failure report.
+
+## Run controls
+
+- `--single-process` (default), or `--multiprocess --processes N`. The count applies
+  to every sliced stage; coordinators are additional processes.
+- `--sharrow` (default) or `--no-sharrow`. Sharrow enabled requires its source pin.
+- `--households N` (default 1,000); zero uses the original full input population.
+  abench never replicates households. Positive samples must match realized output.
+- `--config-overlay configs_explicit_chunk` adds config directories in listed
+  priority order. Relative overlay paths are relative to the model directory.
+- `--memory 16g`, `--shm-size 8g`, `--interval 0.5`, and optional `--platform`.
+- `--output-dir` must be new. `--label` names an experiment, and `--compare` accepts
+  earlier experiment directories. `--cache-from` seeds compatible generated flows;
+  a complete warmup still runs.
+
+`abench validate` accepts the same experiment arguments without `--output-dir`.
+It checks the profile, required inputs, CSV population size, source pin syntax,
+and Docker capabilities without building an image or running the model. It does
+not prove Git commit availability, package compatibility, or skim consistency;
+those are checked by the build and model run.
+
+## Any dependency from GitHub source
+
+Repeat `--source` for any Python distribution, including add-on extensions:
+
+```bash
+--source 'my-addon[fast]=ExampleOrg/model-addon@<SHA>#subdirectory=python/addon'
+```
+
+The left side is the **distribution name** (which can differ from its import
+module). Each source uses an exact full SHA and an `organization/repository` name.
+Extras and a repository subdirectory are optional. Profiles can declare the same
+entries as strings or mappings:
+
+```yaml
+sources:
+  - name: my-addon
+    repository: ExampleOrg/model-addon
+    commit: '0123456789abcdef0123456789abcdef01234567'
+    extras: [fast]
+    subdirectory: python/addon
+```
+
+CLI sources override profile sources by normalized distribution name. Duplicate
+CLI entries are errors. `--activitysim-commit` and `--sharrow-commit` remain aliases
+for the official repositories; conflicting alias/source declarations are errors.
+
+Inside Docker, abench verifies each checkout's Git object, builds a wheel, checks
+its distribution name, then installs all source wheels together with other
+requirements. It runs `pip check` and verifies installed wheel identities. Exact
+source commits, resolved versions, and the full dependency environment are saved.
+All source dependencies must agree: conflicting requirements fail the build.
+
+Use profile `requirements` for additional registry requirements and `constraints`
+for resolver bounds or exact transitive pins. Profiles may select `python_image`
+(a compatible Debian-based image, optionally pinned by digest). The default image
+includes a compiler and HDF5 headers. Packages requiring other system libraries
+can use a prebuilt compatible base image. Private GitHub authentication and custom
+OS provisioning are outside the initial interface.
+
+Source pins do not freeze unpinned transitive/build dependencies or base images.
+Retain images and dependency manifests for strict reproduction. Build isolation
+may fetch build requirements; constraints currently govern the final environment,
+not those isolated build environments.
+
+## Add another model
+
+Create `benchmark.yaml` in its model directory, then use `--model-dir`:
+
+```yaml
+schema_version: 1
+name: My regional model
+configs: [configs]
+mp_configs: [configs_mp]
+snapshot: [configs, configs_mp, extensions]
+extensions: [extensions]
+data_dir: data
+required_inputs:
+  - [households.csv, households.parquet]
+  - persons.csv
+  - land_use.csv
+  - skims.omx
+settings:
+  use_shadow_pricing: false
+  rng_base_seed: 0
+input_tables:
+  households: {}
+  persons: {}
+  land_use:
+    totals: [TOTPOP, TOTHH, TOTEMP]
+    zone_columns: [TAZ]
+output_tables:
+  households: {}
+  persons: {}
+  tours: {}
+  trips:
+    categories: [trip_mode, primary_purpose]
+```
+
+Paths in a profile are relative to the model directory (except `data_dir`, which
+may be absolute). `configs` and `mp_configs` are ordered, highest priority first.
+`snapshot` must cover config files, local extension modules, and adapter modules;
+entries must not overlap or contain directory symlinks. Data is mounted read-only
+and should not change during a run. Profiles are trusted model code/configuration.
+
+Settings precedence, lowest to highest: **normal model configs → profile settings
+→ user overlays → required CLI controls** (sample, SP/MP, worker counts, Sharrow,
+and fail-fast). Generated inheriting profile configs preserve this ordering when
+ActivitySim reconstructs worker settings. Component overlays remain independent.
+
+Optional profile fields:
+
+| Field | Purpose |
+|---|---|
+| `models_from`, `exclude_models` | Take a YAML `models` list and explicitly omit diagnostic steps. Otherwise use normal settings. |
+| `mp_settings` | Read `multiprocess_steps` from a separate YAML file. |
+| `extensions` | Import modules through ActivitySim's registration mechanism, including spawned workers. Installing a package alone does not register its components. |
+| `adapter: module:function` | Optional `function(state, spec, phase)` initialization hook, called once in the model parent before execution. Use `state.import_extensions` for worker setup; parent-only mutations are not automatically worker initialization. |
+| `input_tables`, `output_tables` | Logical table names mapped to summary options: `file` (stem), `totals`, `categories`, and `zone_columns` for land use. CSV and Parquet are supported. Use logical `households` for sample validation. |
+| `output_prefix` | Default `final_`; applied to output file stems. |
+| `household_table` | Default `households.csv`, used for early CSV sample validation. Parquet samples are checked after execution. |
+| `zone_label` | Display label for land-use rows, such as zones or MAZs. |
+
+For specialized data formats, an adapter can arrange compatible CSV/Parquet
+summary outputs. The initial generic reader does not interpret arbitrary binary
+model outputs.
+
+## Measurement and reports
+
+Sharrow runs first complete a full matching warmup in a separate container. The
+measured run uses the same sample, seed, layout, and cache path. Numba compilation
+of generated flow overloads is rejected during measurement; ordinary non-flow
+compilation and disk-cache loading remain included. This guard uses private
+Numba internals and is covered by real disk-cache hit/miss tests.
+
+Memory is the whole-container cgroup v2 charge, counting shared pages once.
+Blue is `memory.current` (including file cache, shared memory, and kernel costs).
+Green dashed is `anon + shmem`, a subset excluding ordinary file cache and kernel
+costs. Never add the lines. Swap is recorded separately and disabled by equal
+memory/memory+swap limits. `/dev/shm` capacity is within that limit.
+
+Component runtimes show worker mean, population SD, count, and maximum. Worker SD
+is imbalance, not confidence across repeated trials. The component dropdown
+highlights each worker's actual window; overlaps darken and gaps remain clear.
+Overall elapsed includes startup, coordination, and checkpoint writes between
+components. Kernel peak includes startup; warmup and post-run summaries are
+excluded. Shared VM page-cache ownership can influence container charges: this
+is not a cold-input I/O benchmark.
+
+```bash
+abench report --compare /path/to/run-a /path/to/run-b \
+  --output-dir /path/to/comparison.html
+```
+
+Reports are offline HTML/SVG/JavaScript plus normalized JSON. They retain fastest
+successful component highlighting and use common memory axes. Existing MTC and
+SANDAG schema-1 experiments remain readable, including approximate legacy timing
+windows where only completion logs exist. New experiments use schema 2 and include
+source manifests, resolved profile/settings, model and harness snapshots, file
+hashes, Docker details, and source installation provenance. Input file size/mtime
+records are provenance hints, not content hashes of large skims.
+
+## Development and CI
+
+```bash
+python -m pip install -e '.[test]' -r tests/requirements.txt
+python -m pytest -m 'not docker'
+pre-commit run --all-files
+python -m build
+ABENCH_DOCKER_TESTS=1 python -m pytest tests/test_docker.py -v
+```
+
+Install Node.js to exercise the offline chart selector test. GitHub Actions runs
+unit tests on Python 3.10–3.12, lint/format checks, wheel packaging checks, and Linux
+Docker integration. The Docker tests build pinned ActivitySim/Sharrow sources and
+run a four-household extension workflow in serial and multiprocess modes, checking
+warmup, generated-code cache reuse, per-worker timings, merged outputs, memory,
+and reports. They do not require either example repository or large datasets.
+
+Adapted from the MTC and SANDAG benchmark harnesses developed in this workspace.
+The original measurement approach was informed by WSP's Lighthouse production
+benchmark. See LICENSE for the retained BSD license.

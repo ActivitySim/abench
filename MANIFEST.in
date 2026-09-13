@@ -1,0 +1,3 @@
+include LICENSE README.md .pre-commit-config.yaml
+recursive-include tests *.py *.yaml *.csv *.txt
+recursive-include .github *.yml
