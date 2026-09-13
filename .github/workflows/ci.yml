@@ -58,12 +58,11 @@ jobs:
         with:
           name: docker-experiments
           path: |
-            experiments/ci/**/experiment/*.html
-            experiments/ci/**/experiment/*.json
-            experiments/ci/**/experiment/*.txt
-            experiments/ci/**/experiment/*.log
-            experiments/ci/**/experiment/measured/*.json*
-            experiments/ci/**/experiment/measured/*.csv
-            experiments/ci/**/experiment/measured/*.log
-            experiments/ci/**/experiment/warmup/*.log
+            experiments/ci/**/*.html
+            experiments/ci/**/*.json
+            experiments/ci/**/*.jsonl
+            experiments/ci/**/*.txt
+            experiments/ci/**/*.log
+            experiments/ci/**/*.csv
+            experiments/ci/**/*.yaml
           if-no-files-found: ignore

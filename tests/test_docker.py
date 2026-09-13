@@ -59,3 +59,40 @@ def test_tiny_model(tmp_path, multiprocess, sharrow):
     assert not list((output / "measured").glob("cache-miss-*"))
     lines = (output / "measured/output/final_households.csv").read_text().splitlines()
     assert set(lines[1:]) == {"1,20", "2,40", "3,60", "4,80"}
+
+
+def test_named_suite(tmp_path):
+    """Exercise file dispatch, shared defaults, serial/MP overrides, and comparison."""
+    import yaml
+
+    root = tmp_path / "model"
+    shutil.copytree(Path(__file__).parent / "fixtures/tiny", root)
+    path = tmp_path / "experiments.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            dict(
+                schema_version=1,
+                output_root="results",
+                defaults=dict(
+                    model_dir="model",
+                    sharrow=True,
+                    households=4,
+                    memory="3g",
+                    shm_size="256m",
+                    sources=[
+                        f"activitysim=ActivitySim/activitysim@{ACTIVITYSIM}",
+                        f"sharrow=ActivitySim/sharrow@{SHARROW}",
+                    ],
+                ),
+                runs={"serial": {}, "parallel": {"multiprocess": True, "processes": 2}},
+            ),
+            sort_keys=False,
+        )
+    )
+    assert cli.main([str(path)]) == 0
+    root = tmp_path / "results"
+    runs = json.loads((root / "comparison.json").read_text())
+    assert len(runs) == 2 and all(run["valid"] for run in runs)
+    assert [run["components"]["bench_compute"]["n"] for run in runs] == [1, 2]
+    assert (root / "experiments.yaml").read_text() == path.read_text()
+    assert (root / "suite.json").is_file()

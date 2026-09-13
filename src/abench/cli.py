@@ -53,7 +53,10 @@ def positive(value):
 
 
 def parser():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Named experiments: abench experiments.yaml; preflight: abench validate experiments.yaml",
+    )
     p.add_argument("--model-dir", type=Path, default=Path.cwd())
     p.add_argument("--profile", default="benchmark.yaml")
     p.add_argument(
@@ -181,6 +184,20 @@ def container_phase(spec, output, data, image, phase_name):
 def main(argv=None):
     p = parser()
     argv = list(sys.argv[1:] if argv is None else argv)
+    # A file invocation stays separate from model profiles and ordinary flags.
+    candidate = argv[1:] if argv and argv[0] in ("run", "validate") else argv
+    if (
+        candidate
+        and not candidate[0].startswith("-")
+        and candidate[0] not in ("run", "report", "validate")
+    ):
+        if len(candidate) != 1:
+            p.error(
+                "an experiment file cannot be mixed with command-line overrides; edit its defaults or runs"
+            )
+        from .experiments import run_suite
+
+        return run_suite(Path(candidate[0]), main, validate_only=argv[0] == "validate")
     action = argv.pop(0) if argv and argv[0] in ("run", "report", "validate") else "run"
     args = p.parse_args(argv)
     if action == "report":

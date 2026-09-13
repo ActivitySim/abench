@@ -26,6 +26,79 @@ Bookworm/Python 3.11. Current instrumentation requires ActivitySim's
 `workflow.State` API (1.4-era or newer); arbitrary historical revisions are not
 promised to work. Build/runtime failures retain diagnostics and a failure report.
 
+## Named experiment files
+
+Write common options once and override only what differs between runs:
+
+```yaml
+schema_version: 1
+vars:
+  model: /path/to/sandag-abm3-example
+output_root: ./results/sandag-${timestamp}
+defaults:
+  model_dir: ${model}
+  profile: sandag
+  data_dir: ${model}/benchmarking-data
+  config_overlay: ["${model}/configs_explicit_chunk"]
+  multiprocess: true
+  processes: 4
+  sharrow: true
+  households: 28365
+  memory: 80g
+  shm_size: 8g
+  sources:
+    - sharrow=ActivitySim/sharrow@fc175b27d8e0c5d202721c67d96b050e6117b235
+runs:
+  main:
+    sources:
+      - activitysim=ActivitySim/activitysim@5c6fae24a91a57a2d6dfc2e1dbe062a61d94545a
+  pr1110:
+    sources:
+      - activitysim=ActivitySim/activitysim@51e298a84276813946e1d623c9a5785e078e022f
+```
+
+Save it as `sandag.yaml`, then run:
+
+```bash
+abench sandag.yaml
+# Or check all runs without building images or running models:
+abench validate sandag.yaml
+```
+
+A ready-to-use [SANDAG chunked suite](examples/sandag-chunked.yaml) is included
+in the repository. Its paths assume abench and the SANDAG repository are siblings.
+The pinned `main` revision is the one used in the earlier trials, not a moving
+branch reference.
+
+- `defaults` accepts CLI options using underscores (`shm_size`, `config_overlay`,
+  etc.). Use `multiprocess: false` for serial execution and `sharrow: false` to
+  disable Sharrow. `sources` accepts the same strings/mappings as model profiles.
+- `runs` is an ordered mapping of names to overrides. Each run inherits defaults;
+  ordinary values and lists are replaced. **Sources merge by normalized package
+  name**, so changing ActivitySim does not discard the shared Sharrow pin.
+- `${name}` substitutes a reusable scalar from `vars`; terms can reference other
+  terms. A whole-value reference preserves its type, including numbers/booleans.
+  Undefined references and cycles are errors. No shell or environment expansion
+  is performed. `${timestamp}` is a built-in UTC launch identifier shared by all
+  runs, with microseconds to avoid reusing output directories.
+- All explicit paths in the suite are relative to the YAML file, independent of
+  the terminal's current directory. This includes overlays and custom profile
+  paths. Built-in `mtc`/`sandag` profile names retain their meaning. When omitted,
+  `model_dir` defaults to the YAML file's directory; the model profile still
+  supplies its usual default data/config paths.
+- The suite owns output locations: `output_root/<run-name>/`. Set `output_root`
+  once instead of `output_dir` in each run. Existing roots are rejected.
+- All runs are preflighted before the first starts, then run sequentially in file
+  order. Failure stops the suite and retains partial results. The combined report
+  is `output_root/comparison.html`; individual runs retain their own reports.
+  `experiments.yaml` and `suite.json` record the original file and expanded plan.
+- File invocations do not accept additional CLI overrides. Edit `defaults` or the
+  relevant run to keep the file a complete description of the experiment.
+
+This experiment file describes **which tests to run**. A model profile such as
+`benchmark.yaml` describes **how to configure a model**, and remains reusable
+across suites.
+
 ## Run controls
 
 - `--single-process` (default), or `--multiprocess --processes N`. The count applies
