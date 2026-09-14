@@ -16,7 +16,7 @@ defaults:
   sharrow: true
   households: ${households}
   # The 500-household cache build misses rare at-work flows and dtype signatures.
-  # This model-specific override keeps the same sample, but warmup is still serial.
+  # Use 5,000 households for the serial warmup; measured cache misses remain errors.
   warmup_households: 5000
   memory: 80g
   shm_size: 8g

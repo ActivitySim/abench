@@ -31,7 +31,7 @@ def test_warmup_cap_and_measured_isolation(target, cap, expected):
     assert spec == original
 
 
-@pytest.mark.parametrize("count", [3, 600])
+@pytest.mark.parametrize("count", [3, 6000])
 @pytest.mark.parametrize("format", ["csv", "parquet"])
 def test_full_population_caps_available_households(tmp_path, count, format):
     data = pd.DataFrame({"household_id": range(count)})
@@ -40,7 +40,7 @@ def test_full_population_caps_available_households(tmp_path, count, format):
     else:
         data.to_parquet(tmp_path / "households.parquet", index=False)
     spec = dict(households=0, multiprocess=True, processes=4, profile={})
-    assert phase_spec(spec, "warmup", tmp_path)["households"] == min(count, 500)
+    assert phase_spec(spec, "warmup", tmp_path)["households"] == min(count, 5000)
     assert phase_spec(spec, "measured", tmp_path)["households"] == 0
 
 
@@ -59,5 +59,16 @@ def test_custom_household_table_and_empty_population(tmp_path):
 
 
 def test_default_and_override_parser():
-    assert parser().parse_args([]).warmup_households == 500
+    assert parser().parse_args([]).warmup_households == 5000
     assert parser().parse_args(["--warmup-households", "100"]).warmup_households == 100
+
+
+@pytest.mark.parametrize("target", [200, 5000, 28365])
+def test_default_warmup_cap(target):
+    """The default bounds cache preparation without increasing small samples."""
+    spec = dict(households=target, multiprocess=True, processes=4, profile={})
+    warmup = phase_spec(spec, "warmup")
+    assert warmup["households"] == min(target, 5000)
+    assert warmup["multiprocess"] is False
+    assert warmup["processes"] == 1
+    assert phase_spec(spec, "measured") == spec

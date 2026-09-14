@@ -231,8 +231,8 @@ model outputs.
 ## Measurement and reports
 
 Sharrow runs first execute the model in a separate **single-process** warmup,
-using **min(target households, 500)** households by default. For `--households 0`,
-the target is the full available population, so warmup uses at most 500 of those
+using **min(target households, 5000)** households by default. For `--households 0`,
+the target is the full available population, so warmup uses at most 5000 of those
 households. Set `--warmup-households N` (or `warmup_households: N` in experiment
 YAML) to change this positive cap. Warmup always uses one process; measured runs
 retain their requested sample and worker count. Model config directories, seed,

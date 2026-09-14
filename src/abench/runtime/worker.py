@@ -24,7 +24,7 @@ def phase_spec(spec, phase_name, data_root=Path("/data")):
     result = dict(spec)
     if phase_name != "warmup":
         return result
-    cap = spec.get("warmup_households", 500)
+    cap = spec.get("warmup_households", 5000)
     target = spec["households"]
     if target == 0:
         # Zero denotes the full population, not an empty sample. Count only as

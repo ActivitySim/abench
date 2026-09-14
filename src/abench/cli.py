@@ -80,8 +80,8 @@ def parser():
     p.add_argument(
         "--warmup-households",
         type=int,
-        default=500,
-        help="maximum cache-build households (default: 500); warmup is always single-process",
+        default=5000,
+        help="maximum cache-build households (default: 5000); warmup is always single-process",
     )
     p.add_argument("--data-dir", type=Path, default=None)
     p.add_argument(

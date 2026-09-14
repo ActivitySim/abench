@@ -174,7 +174,7 @@ def test_shipped_sandag_suite():
     for run in plan["runs"]:
         args = cli.parser().parse_args(run["argv"])
         assert args.households == 28365
-        assert args.warmup_households == args.households
+        assert args.warmup_households == 5000
         assert args.processes == 4
         assert args.sharrow
         assert args.data_dir.name == "benchmarking-data"

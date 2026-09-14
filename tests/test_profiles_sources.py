@@ -186,6 +186,6 @@ def test_serial_warmup_retains_target_mp_configs(tmp_path):
         phase_spec(spec, "warmup"), phase, tmp_path, tmp_path / "data", tmp_path
     )
     assert state.settings.rng_base_seed == 123
-    assert state.settings.households_sample_size == 500
+    assert state.settings.households_sample_size == 1000
     assert state.settings.multiprocess is False
     assert state.settings.num_processes == 1
