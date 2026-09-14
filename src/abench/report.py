@@ -8,6 +8,7 @@ import re
 import statistics
 
 from .common import read_json, write_json
+from .failures import describe_failure
 
 COLORS = ("#0072b2", "#d55e00", "#009e73", "#cc79a7", "#e69f00", "#56b4e9")
 
@@ -142,6 +143,14 @@ def load_run(directory):
         and not docker.get("OOMKilled")
         and not list(phase.glob("cache-miss-*.txt"))
     )
+    warmup_settings = read_json(directory / "warmup/phase-settings.json", {})
+    effective = read_json(directory / "warmup/effective-settings.json", {})
+    if effective:
+        warmup_settings = {
+            "households": effective.get("households_sample_size"),
+            "multiprocess": effective.get("multiprocess"),
+            "processes": effective.get("num_processes"),
+        }
     return {
         "spec": spec,
         "components": components,
@@ -151,6 +160,12 @@ def load_run(directory):
         "valid": valid,
         "inputs": read_json(phase / "input-summary.json", {}),
         "outputs": outputs,
+        "failure_reason": describe_failure(
+            directory, spec.get("failure", {}).get("phase", "measured")
+        )
+        if not valid
+        else None,
+        "warmup_settings": warmup_settings,
         "peak": max((r["peak_bytes"] for r in memory), default=0),
         "docker": docker,
         "path": str(directory),
@@ -255,6 +270,7 @@ def experiment_card(run, xmax, ymax):
             "processes",
             "sharrow",
             "households",
+            "warmup_households",
             "data_dir",
             "output_dir",
             "memory",
@@ -293,11 +309,16 @@ def experiment_card(run, xmax, ymax):
     counts.append(f"<tr><th>TAZs</th>{taz_cells}</tr>")
     elapsed = run["status"].get("elapsed_seconds")
     elapsed = f"{elapsed:.3f}" if elapsed is not None else "unavailable"
-    failure = f"<p>{escape(spec['failure'])}</p>" if spec.get("failure") else ""
+    failure = (
+        f"<pre>{escape(run['failure_reason'])}</pre>"
+        if run.get("failure_reason")
+        else ""
+    )
     details = "".join(
         f"<details><summary>{title}</summary><pre>{escape(json.dumps(value, indent=2))}</pre></details>"
         for title, value in (
             ("Complete settings and provenance", spec),
+            ("Actual cache-build settings", run.get("warmup_settings", {})),
             ("Input totals and categories", run["inputs"]),
             ("Output totals and categories", run["outputs"]),
             ("Container exit and OOM status", run["docker"]),

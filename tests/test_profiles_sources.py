@@ -163,3 +163,29 @@ def test_cli_failure_keeps_report(tmp_path, monkeypatch):
         == "build"
     )
     assert (output / "runner/build_sources.py").is_file()
+
+
+def test_serial_warmup_retains_target_mp_configs(tmp_path):
+    """Only execution layout changes; target-only config layers must still apply."""
+    from abench.runtime.worker import phase_spec
+
+    profile = make_model(tmp_path)
+    mp_configs = tmp_path / "mp_configs"
+    mp_configs.mkdir()
+    (mp_configs / "settings.yaml").write_text(
+        "inherit_settings: true\nrng_base_seed: 123\n"
+    )
+    profile["mp_configs"] = ["mp_configs"]
+    phase = tmp_path / "warmup"
+    phase.mkdir()
+    (phase / "output").mkdir()
+    spec = dict(
+        profile=profile, households=1000, multiprocess=True, processes=4, sharrow=True
+    )
+    state = make_state(
+        phase_spec(spec, "warmup"), phase, tmp_path, tmp_path / "data", tmp_path
+    )
+    assert state.settings.rng_base_seed == 123
+    assert state.settings.households_sample_size == 500
+    assert state.settings.multiprocess is False
+    assert state.settings.num_processes == 1

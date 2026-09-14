@@ -19,6 +19,57 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def phase_spec(spec, phase_name, data_root=Path("/data")):
+    """Shrink only warmup; retain target config selection and the measured spec."""
+    result = dict(spec)
+    if phase_name != "warmup":
+        return result
+    cap = spec.get("warmup_households", 500)
+    target = spec["households"]
+    if target == 0:
+        # Zero denotes the full population, not an empty sample. Count only as
+        # far as the cap for CSV, or use Parquet metadata without loading rows.
+        profile = spec["profile"]
+        filename = profile.get("household_table")
+        if filename is None:
+            stem = (
+                profile.get("input_tables", {})
+                .get("households", {})
+                .get("file", "households")
+            )
+            filename = stem + ".csv"
+        path = data_root / filename
+        if not path.exists() and path.suffix == ".csv":
+            path = path.with_suffix(".parquet")
+        if path.suffix == ".csv" and path.is_file():
+            with path.open(newline="") as stream:
+                reader = csv.reader(stream)
+                next(reader, None)
+                target = 0
+                for row in reader:
+                    if row:
+                        target += 1
+                        if target >= cap:
+                            break
+        elif path.suffix == ".parquet" and path.is_file():
+            import pyarrow.parquet as pq
+
+            target = pq.ParquetFile(path).metadata.num_rows
+        else:
+            raise ValueError(
+                "Cannot determine full-population warmup size; configure household_table or set a positive --households target"
+            )
+        if target < 1:
+            raise ValueError("Cannot build a flow cache from an empty household table")
+    result.update(
+        households=min(target, cap),
+        multiprocess=False,
+        processes=1,
+        _target_multiprocess=spec["multiprocess"],
+    )
+    return result
+
+
 def make_state(
     spec,
     phase,
@@ -36,6 +87,7 @@ def make_state(
     from activitysim.core.workflow import State
 
     profile = spec["profile"]
+    config_multiprocess = spec.get("_target_multiprocess", spec["multiprocess"])
     defaults = dict(profile.get("settings", {}))
     if profile.get("models_from"):
         base = yaml.safe_load((model_root / profile["models_from"]).read_text())
@@ -44,7 +96,7 @@ def make_state(
             for name in base["models"]
             if name not in profile.get("exclude_models", [])
         ]
-    if spec["multiprocess"] and profile.get("mp_settings"):
+    if config_multiprocess and profile.get("mp_settings"):
         mp = yaml.safe_load((model_root / profile["mp_settings"]).read_text())
         defaults["multiprocess_steps"] = mp["multiprocess_steps"]
     generated = phase / "profile-config"
@@ -57,7 +109,7 @@ def make_state(
         model_root / f"overlay-{i}" for i in range(len(spec.get("config_overlay", [])))
     ]
     configs += [generated]
-    if spec["multiprocess"]:
+    if config_multiprocess:
         configs += [model_root / name for name in profile.get("mp_configs", [])]
     configs += [model_root / name for name in profile["configs"]]
     state = State.make_default(
@@ -99,7 +151,12 @@ def make_state(
 
 
 def run_model(spec, phase):
-    """Use identical samples, process layout and cache paths in both phases."""
+    """Warm flows with a small serial run; measure the untouched target settings."""
+    spec = phase_spec(spec, phase.name)
+    write_json(
+        phase / "phase-settings.json",
+        {key: spec[key] for key in ("households", "multiprocess", "processes")},
+    )
     state = make_state(spec, phase)
     state.logging.config_logger()
     write_json(

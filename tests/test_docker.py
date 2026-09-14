@@ -55,6 +55,11 @@ def test_tiny_model(tmp_path, multiprocess, sharrow):
     assert run["outputs"]["households"]["rows"] == 4
     assert run["memory"] and all(row["current_bytes"] > 0 for row in run["memory"])
     assert (output / "warmup").exists() == sharrow
+    if sharrow:
+        warmup = json.loads((output / "warmup/effective-settings.json").read_text())
+        assert warmup["households_sample_size"] == 4
+        assert warmup["multiprocess"] is False
+        assert warmup["num_processes"] == 1
     assert len(json.loads((output / "source-provenance.json").read_text())) == 2
     assert not list((output / "measured").glob("cache-miss-*"))
     lines = (output / "measured/output/final_households.csv").read_text().splitlines()
@@ -77,6 +82,7 @@ def test_named_suite(tmp_path):
                     model_dir="model",
                     sharrow=True,
                     households=4,
+                    warmup_households=2,
                     memory="3g",
                     shm_size="256m",
                     sources=[
@@ -96,3 +102,12 @@ def test_named_suite(tmp_path):
     assert [run["components"]["bench_compute"]["n"] for run in runs] == [1, 2]
     assert (root / "experiments.yaml").read_text() == path.read_text()
     assert (root / "suite.json").is_file()
+    for name in ("serial", "parallel"):
+        warmup = json.loads(
+            (root / name / "warmup/effective-settings.json").read_text()
+        )
+        assert warmup["households_sample_size"] == 2
+        assert warmup["multiprocess"] is False
+        assert warmup["num_processes"] == 1
+        summaries = json.loads((root / name / "warmup/output-summary.json").read_text())
+        assert summaries["households"]["rows"] == 2

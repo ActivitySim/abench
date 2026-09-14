@@ -12,6 +12,8 @@ from activitysim.core import workflow
 def bench_initialize(state: workflow.State):
     """Seed four rows and a generated Numba module in the guarded flow directory."""
     households = pd.read_csv(Path("/data/households.csv"), index_col="household_id")
+    if state.settings.households_sample_size:
+        households = households.head(state.settings.households_sample_size)
     state.add_table("households", households)
     cache = Path(state.settings.sharrow_cache_dir)
     cache.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,7 @@ OPTIONS = {
     "processes",
     "sharrow",
     "households",
+    "warmup_households",
     "data_dir",
     "config_overlay",
     "cache_from",

@@ -33,6 +33,8 @@ Write common options once and override only what differs between runs:
 ```yaml
 schema_version: 1
 vars:
+  households: 28365
+  warmup_households: 5000
   model: /path/to/sandag-abm3-example
 output_root: ./results/sandag-${timestamp}
 defaults:
@@ -43,7 +45,8 @@ defaults:
   multiprocess: true
   processes: 4
   sharrow: true
-  households: 28365
+  households: ${households}
+  warmup_households: ${warmup_households}
   memory: 80g
   shm_size: 8g
   sources:
@@ -111,7 +114,7 @@ across suites.
 - `--memory 16g`, `--shm-size 8g`, `--interval 0.5`, and optional `--platform`.
 - `--output-dir` must be new. `--label` names an experiment, and `--compare` accepts
   earlier experiment directories. `--cache-from` seeds compatible generated flows;
-  a complete warmup still runs.
+  the small serial warmup still runs.
 
 `abench validate` accepts the same experiment arguments without `--output-dir`.
 It checks the profile, required inputs, CSV population size, source pin syntax,
@@ -227,9 +230,25 @@ model outputs.
 
 ## Measurement and reports
 
-Sharrow runs first complete a full matching warmup in a separate container. The
-measured run uses the same sample, seed, layout, and cache path. Numba compilation
-of generated flow overloads is rejected during measurement; ordinary non-flow
+Sharrow runs first execute the model in a separate **single-process** warmup,
+using **min(target households, 500)** households by default. For `--households 0`,
+the target is the full available population, so warmup uses at most 500 of those
+households. Set `--warmup-households N` (or `warmup_households: N` in experiment
+YAML) to change this positive cap. Warmup always uses one process; measured runs
+retain their requested sample and worker count. Model config directories, seed,
+chunk overlays, and flow cache path are retained from the target experiment.
+
+A smaller serial warmup may not exercise every flow signature required by the
+measured run. **Cache misses still invalidate the measured experiment**: abench
+does not silently compile, retry with compilation enabled, or accept incomplete
+cache coverage. Increase the warmup cap when needed.
+The CLI and failure report identify the phase, failed component, cache flow, and
+log path; `cache-miss-details-*.jsonl` records the exact required Numba signature.
+`phase-settings.json` and
+`effective-settings.json` preserve the actual settings for each phase, and the
+report includes the cache-build settings separately from the measured target.
+
+Numba compilation of generated flow overloads is rejected during measurement; ordinary non-flow
 compilation and disk-cache loading remain included. This guard uses private
 Numba internals and is covered by real disk-cache hit/miss tests.
 

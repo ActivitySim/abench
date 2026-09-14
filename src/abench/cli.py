@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import __version__
 from .common import read_json, write_json
+from .failures import BenchmarkFailure, describe_failure
 from .profiles import load_profile, validate_model
 from .report import load_run, report
 from .sources import resolve_sources
@@ -75,6 +76,12 @@ def parser():
     p.add_argument("--sharrow", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument(
         "--households", type=int, default=1000, help="0 means full population"
+    )
+    p.add_argument(
+        "--warmup-households",
+        type=int,
+        default=500,
+        help="maximum cache-build households (default: 500); warmup is always single-process",
     )
     p.add_argument("--data-dir", type=Path, default=None)
     p.add_argument(
@@ -241,6 +248,8 @@ def main(argv=None):
     )
     if args.sharrow and not args.sharrow_commit:
         p.error("Sharrow enabled: provide a sharrow source override")
+    if args.warmup_households < 1:
+        p.error("--warmup-households must be positive")
     if args.households < 0:
         p.error("--households must be nonnegative")
     if args.multiprocess and (args.processes is None or args.processes < 1):
@@ -424,17 +433,27 @@ def main(argv=None):
         if seed:
             if (seed / "pip-freeze.txt").read_text().strip() != freeze.strip():
                 raise ValueError("Cannot seed cache: installed dependencies differ")
-            # Only flow artifacts are reused. Full warmup still checks coverage
-            # under the new configuration before compilation-blocked measurement.
+            # Only flow artifacts are reused. A small serial warmup prepares flows;
+            # measurement remains responsible for rejecting missing signatures.
             shutil.copytree(seed / "cache/flows", output / "cache/flows")
         if args.sharrow:
             stage = "warmup"
-            print("Preparing Sharrow cache with a complete matching run…", flush=True)
+            print(
+                f"Preparing Sharrow cache in single process (up to {args.warmup_households} households)…",
+                flush=True,
+            )
             container_phase(spec, output, data, image, "warmup")
         stage = "measured"
         print("Running measured model…", flush=True)
         container_phase(spec, output, data, image, "measured")
+        if not load_run(output)["valid"]:
+            raise BenchmarkFailure(describe_failure(output, "measured"))
     except (Exception, KeyboardInterrupt) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            error = BenchmarkFailure(describe_failure(output, stage))
+            spec["failure"] = {"phase": stage, "error": str(error)}
+            write_json(output / "experiment.json", spec)
+            raise error from None
         spec["failure"] = {"phase": stage, "error": str(error)}
         write_json(output / "experiment.json", spec)
         raise

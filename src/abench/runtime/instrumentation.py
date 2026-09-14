@@ -55,7 +55,19 @@ def install(flow_cache=Path("/results/cache/flows")):
             if filename.is_relative_to(flow_cache):
                 with (records / f"cache-miss-{os.getpid()}.txt").open("a") as stream:
                     stream.write(str(filename) + "\n")
-                raise RuntimeError(f"Measured Sharrow flow cache miss: {filename}")
+                detail = {
+                    "flow": str(filename),
+                    "function": self.py_func.__name__,
+                    "signature": str(args[0] if args else kwargs),
+                    "process": multiprocessing.current_process().name,
+                }
+                with (records / f"cache-miss-details-{os.getpid()}.jsonl").open(
+                    "a"
+                ) as stream:
+                    stream.write(json.dumps(detail) + "\n")
+                raise RuntimeError(
+                    f"Measured Sharrow flow cache miss: {filename} ({self.py_func.__name__}); required signature: {detail['signature']}"
+                )
             return compile_original(self, *args, **kwargs)
 
         _FunctionCompiler.compile = compile_checked
