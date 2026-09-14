@@ -42,6 +42,20 @@ def bench_export(state: workflow.State, households: pd.DataFrame):
 
 def prepare(state, spec, phase):
     """Supply tiny shared skims; this fixture has no destination/shadow models."""
+    if phase.name == "warmup":
+        from numba.core.dispatcher import _FunctionCompiler
+
+        original = _FunctionCompiler.compile
+
+        def record_compile(compiler, *args, **kwargs):
+            # Record actual generated-code compilation, not dispatcher creation.
+            if "tiny_generated.py" in compiler.py_func.__code__.co_filename:
+                (Path(state.filesystem.output_dir) / "flow-compiled.txt").write_text(
+                    "compiled"
+                )
+            return original(compiler, *args, **kwargs)
+
+        _FunctionCompiler.compile = record_compile
     state.set("shadow_pricing_info", None)
     state.set("shadow_pricing_choice_info", None)
     state.set("network_los_preload", None)

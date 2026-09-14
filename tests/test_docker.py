@@ -35,6 +35,8 @@ def test_tiny_model(tmp_path, multiprocess, sharrow):
         f"activitysim=ActivitySim/activitysim@{ACTIVITYSIM}",
         "--source",
         f"sharrow=ActivitySim/sharrow@{SHARROW}",
+        "--flow-cache-dir",
+        str(tmp_path / "shared-flows"),
         "--households",
         "4",
         "--memory",
@@ -80,6 +82,7 @@ def test_named_suite(tmp_path):
                 output_root="results",
                 defaults=dict(
                     model_dir="model",
+                    flow_cache_dir="shared-flows",
                     sharrow=True,
                     households=4,
                     warmup_households=2,
@@ -111,3 +114,12 @@ def test_named_suite(tmp_path):
         assert warmup["num_processes"] == 1
         summaries = json.loads((root / name / "warmup/output-summary.json").read_text())
         assert summaries["households"]["rows"] == 2
+
+    # Both warmups execute, but the second must load compiled code from the first.
+    serial = json.loads((root / "serial/experiment.json").read_text())["flow_cache"]
+    parallel = json.loads((root / "parallel/experiment.json").read_text())["flow_cache"]
+    assert serial["restored_files"] == 0
+    assert parallel["restored_files"] > 0
+    assert serial["key"] == parallel["key"]
+    assert (root / "serial/warmup/output/flow-compiled.txt").exists()
+    assert not (root / "parallel/warmup/output/flow-compiled.txt").exists()

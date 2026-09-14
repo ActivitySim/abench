@@ -113,8 +113,8 @@ across suites.
   priority order. Relative overlay paths are relative to the model directory.
 - `--memory 16g`, `--shm-size 8g`, `--interval 0.5`, and optional `--platform`.
 - `--output-dir` must be new. `--label` names an experiment, and `--compare` accepts
-  earlier experiment directories. `--cache-from` seeds compatible generated flows;
-  the small serial warmup still runs.
+  earlier experiment directories. Compatible compiled flows are reused automatically;
+  the serial warmup still runs.
 
 `abench validate` accepts the same experiment arguments without `--output-dir`.
 It checks the profile, required inputs, CSV population size, source pin syntax,
@@ -237,6 +237,29 @@ households. Set `--warmup-households N` (or `warmup_households: N` in experiment
 YAML) to change this positive cap. Warmup always uses one process; measured runs
 retain their requested sample and worker count. Model config directories, seed,
 chunk overlays, and flow cache path are retained from the target experiment.
+
+Compiled flows are automatically reused across runs and suites, including changes
+in ActivitySim revisions, sample sizes, process counts, and model configs. The
+persistent host cache defaults to `~/.cache/abench/flows`. Change it with
+`--flow-cache-dir PATH` (`flow_cache_dir` in YAML), or disable automatic reads and
+writes with `--no-reuse-flows` (`reuse_flows: false`). `--cache-from` remains an
+explicit seed option with its existing stricter dependency checks.
+
+Compatibility uses the **installed** Sharrow, Numba, llvmlite, and NumPy versions,
+plus their source repository/commit identities when applicable, Python version,
+and container architecture/CPU features. ActivitySim and model settings are
+excluded from this key: Sharrow identifies generated flows by their contents,
+and Numba checks cached signatures. Changed flows can compile during warmup.
+An existing cache does **not** guarantee that warmup will need no compilation.
+
+Each experiment receives a private copy with source timestamps preserved. Warmup
+always runs, and successful warmups atomically update the persistent cache before
+measurement starts. Compatible simultaneous warmups wait for each other to avoid
+losing compiled signatures; measured runs remain independent. Only `cache/flows`
+is shared, never model data, outputs, or shared-memory artifacts. Cache identity
+and reuse counts are recorded in `flow-cache-identity.json` and `experiment.json`.
+The persistent cache can be deleted between runs to reclaim disk space; older
+experiments created before this feature are not automatically imported.
 
 A smaller serial warmup may not exercise every flow signature required by the
 measured run. **Cache misses still invalidate the measured experiment**: abench

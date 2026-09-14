@@ -280,6 +280,9 @@ def experiment_card(run, xmax, ymax):
             "compare",
             "config_overlay",
             "cache_from",
+            "reuse_flows",
+            "flow_cache_dir",
+            "flow_cache",
         )
     )
     counts = []

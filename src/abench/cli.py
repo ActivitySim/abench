@@ -10,12 +10,14 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
 from .common import read_json, write_json
 from .failures import BenchmarkFailure, describe_failure
+from .flow_cache import reuse_flows
 from .profiles import load_profile, validate_model
 from .report import load_run, report
 from .sources import resolve_sources
@@ -90,6 +92,18 @@ def parser():
         nargs="+",
         default=[],
         help="extra config directories, highest priority first",
+    )
+    p.add_argument(
+        "--flow-cache-dir",
+        type=Path,
+        default=Path.home() / ".cache/abench/flows",
+        help="persistent compiled-flow cache (default: ~/.cache/abench/flows)",
+    )
+    p.add_argument(
+        "--reuse-flows",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="automatically reuse and update compatible flows; warmup still runs",
     )
     p.add_argument(
         "--cache-from",
@@ -264,6 +278,12 @@ def main(argv=None):
     for path in overlays:
         if not path.is_dir() or (output is not None and output.is_relative_to(path)):
             p.error("config overlays must be existing directories outside --output-dir")
+    args.flow_cache_dir = args.flow_cache_dir.expanduser().resolve()
+    if args.sharrow and args.reuse_flows and output is not None:
+        if args.flow_cache_dir.is_relative_to(output) or output.is_relative_to(
+            args.flow_cache_dir
+        ):
+            p.error("--flow-cache-dir and --output-dir must be separate directories")
     seed = args.cache_from.expanduser().resolve() if args.cache_from else None
     if seed:
         prior = read_json(seed / "experiment.json", {})
@@ -281,7 +301,7 @@ def main(argv=None):
         p.error("Docker bind paths cannot contain commas")
     if output is not None and output.exists():
         p.error(
-            "--output-dir must not already exist; each experiment owns a fresh cache"
+            "--output-dir must not already exist; each experiment needs a separate output directory"
         )
     docker = json.loads(command(["docker", "info", "--format", "{{json .}}"]))
     if docker.get("OSType") != "linux" or str(docker.get("CgroupVersion")) != "2":
@@ -442,7 +462,41 @@ def main(argv=None):
                 f"Preparing Sharrow cache in single process (up to {args.warmup_households} households)…",
                 flush=True,
             )
-            container_phase(spec, output, data, image, "warmup")
+            cache = nullcontext(None)
+            if args.reuse_flows:
+                identity = json.loads(
+                    command(
+                        [
+                            "docker",
+                            "run",
+                            "--rm",
+                            "--network=none",
+                            "--entrypoint",
+                            "python",
+                            image,
+                            "-c",
+                            (PACKAGE / "runtime/cache_identity.py").read_text(),
+                        ]
+                    )
+                )
+                write_json(output / "flow-cache-identity.json", identity)
+                cache = reuse_flows(
+                    args.flow_cache_dir, identity, output / "cache/flows"
+                )
+                print(
+                    "Checking compatible flow cache (waiting for any active warmup)…",
+                    flush=True,
+                )
+            with cache as cache_info:
+                if cache_info is not None:
+                    spec["flow_cache"] = cache_info
+                    write_json(output / "experiment.json", spec)
+                    print(
+                        f"Reused {cache_info['restored_files']} flow-cache files.",
+                        flush=True,
+                    )
+                container_phase(spec, output, data, image, "warmup")
+            write_json(output / "experiment.json", spec)
         stage = "measured"
         print("Running measured model…", flush=True)
         container_phase(spec, output, data, image, "measured")

@@ -26,6 +26,8 @@ OPTIONS = {
     "data_dir",
     "config_overlay",
     "cache_from",
+    "flow_cache_dir",
+    "reuse_flows",
     "label",
     "compare",
     "interval",
@@ -33,7 +35,14 @@ OPTIONS = {
     "shm_size",
     "platform",
 }
-PATHS = {"model_dir", "data_dir", "cache_from", "config_overlay", "compare"}
+PATHS = {
+    "model_dir",
+    "data_dir",
+    "cache_from",
+    "flow_cache_dir",
+    "config_overlay",
+    "compare",
+}
 LISTS = {"config_overlay", "compare"}
 TOKEN = re.compile(r"\$\{([^{}]+)\}")
 
@@ -129,13 +138,13 @@ def arguments(options, base):
     for key, value in options.items():
         if value is None:
             continue
-        if key in ("multiprocess", "sharrow"):
+        if key in ("multiprocess", "sharrow", "reuse_flows"):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be a YAML boolean")
             argv.append(
                 ("--multiprocess" if value else "--single-process")
                 if key == "multiprocess"
-                else ("--sharrow" if value else "--no-sharrow")
+                else ("--" if value else "--no-") + key.replace("_", "-")
             )
             continue
         if key == "sources":
