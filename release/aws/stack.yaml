@@ -117,6 +117,7 @@ Resources:
                   StringLike:
                     s3:prefix:
                       - !Sub '${ArtifactPrefix}/*'
+                      - 'data-cache/*'
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -124,6 +125,9 @@ Resources:
                   - s3:AbortMultipartUpload
                   - s3:ListMultipartUploadParts
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/*'
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucket}/data-cache/*'
 
   ReleaseInstanceProfile:
     Type: AWS::IAM::InstanceProfile

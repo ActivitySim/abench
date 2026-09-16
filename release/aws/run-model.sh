@@ -254,8 +254,11 @@ fi
 "$work_dir/data-venv/bin/pip" freeze > "$metadata/data-download-pip-freeze.txt"
 
 echo "Downloading and verifying full-scale data for $model_name"
+data_cache_bucket=${artifact_uri#s3://}
+data_cache_bucket=${data_cache_bucket%%/*}
 "$work_dir/data-venv/bin/python" "$script_dir/prepare_data.py" \
-  "$model_name" "$model" --cache "$work_dir/data-cache"
+  "$model_name" "$model" --cache "$work_dir/data-cache" \
+  --s3-cache-uri "s3://$data_cache_bucket/data-cache/$model_name"
 
 common=(
   --model-dir "$model"

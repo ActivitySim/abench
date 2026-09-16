@@ -2,6 +2,7 @@
 """Download and verify the canonical full-scale MTC and SANDAG data."""
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,13 +26,24 @@ def prepare_mtc(model: Path, cache: Path) -> None:
     )
 
 
-def prepare_sandag(model: Path) -> None:
+def fetch_s3_cache(source: str, destination: str) -> None:
+    subprocess.run(
+        ["aws", "s3", "sync", source, destination, "--only-show-errors"], check=True
+    )
+
+
+def prepare_sandag(model: Path, s3_cache_uri: str | None) -> None:
     scripts = model / "scripts"
     sys.path.insert(0, str(scripts))
     try:
         from fulldata import get_full_data
 
-        get_full_data(model / "data-full")
+        full_data_dir = model / "data-full"
+        full_data_dir.mkdir(parents=True, exist_ok=True)
+        if s3_cache_uri:
+            print(f"checking data cache {s3_cache_uri}")
+            fetch_s3_cache(s3_cache_uri.rstrip("/") + "/", str(full_data_dir))
+        get_full_data(full_data_dir)
     finally:
         sys.path.remove(str(scripts))
 
@@ -41,13 +53,17 @@ def main(argv=None) -> int:
     parser.add_argument("model", choices=("mtc-extended", "sandag"))
     parser.add_argument("repository", type=Path)
     parser.add_argument("--cache", required=True, type=Path)
+    parser.add_argument(
+        "--s3-cache-uri",
+        help="s3://bucket/prefix of a pre-populated, read-only cache of the extracted data",
+    )
     args = parser.parse_args(argv)
     args.cache.mkdir(parents=True, exist_ok=True)
     repository = args.repository.resolve()
     if args.model == "mtc-extended":
         prepare_mtc(repository, args.cache.resolve())
     else:
-        prepare_sandag(repository)
+        prepare_sandag(repository, args.s3_cache_uri)
     return 0
 
 
