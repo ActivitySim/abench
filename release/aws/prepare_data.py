@@ -21,7 +21,7 @@ def prepare_mtc(model: Path, cache: Path) -> None:
         sha256=MTC_DATA_SHA256,
         link=cache / "mtc",
         base_path=model,
-        unpack=model / "data_full",
+        unpack="data_full",
     )
 
 
