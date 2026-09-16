@@ -13,9 +13,10 @@ abench run --model-dir /path/to/sandag-abm3-example --profile sandag \
   --memory 32g --shm-size 8g --output-dir /path/to/experiments/sandag
 ```
 
-Use `--profile mtc` for MTC; both profiles ship with the package. SANDAG defaults
-to its small `benchmarking-data`, **not full-scale skims**. MTC defaults to
-`data_full`. `--data-dir` overrides either. Model directories need not be Git
+Use `--profile mtc` for base MTC or `--profile mtc-extended` for the extended
+MTC model; all profiles ship with the package. SANDAG defaults to its small
+`benchmarking-data`, **not full-scale skims**. Both MTC profiles default to
+`data_full`. `--data-dir` overrides any profile. Model directories need not be Git
 repositories; Git revision/status are recorded where available and model files
 are always snapshotted. Existing example scripts and normal configs are untouched.
 
@@ -25,6 +26,12 @@ for the chosen memory limit plus VM overhead. The default container is Debian
 Bookworm/Python 3.11. Current instrumentation requires ActivitySim's
 `workflow.State` API (1.4-era or newer); arbitrary historical revisions are not
 promised to work. Build/runtime failures retain diagnostics and a failure report.
+
+For an on-demand full-scale release check of both supported models, see the
+[manual AWS runner](release/aws/README.md). It provisions independent temporary
+EC2 hosts, downloads the checksummed full datasets, runs MTC Extended and SANDAG
+concurrently, saves reports and diagnostics to S3, and terminates both hosts. It
+does not require a GitHub Actions workflow.
 
 ## Named experiment files
 

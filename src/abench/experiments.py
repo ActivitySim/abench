@@ -157,7 +157,9 @@ def arguments(options, base):
             raise ValueError(f"invalid value for {key}")
         if not values:
             continue
-        if key in PATHS or (key == "profile" and value not in ("mtc", "sandag")):
+        if key in PATHS or (
+            key == "profile" and value not in ("mtc", "mtc-extended", "sandag")
+        ):
             values = [str((base / Path(v).expanduser()).resolve()) for v in values]
         argv += ["--" + key.replace("_", "-"), *map(str, values)]
     return argv

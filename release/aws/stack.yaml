@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: One ephemeral host for a full-scale ActivitySim model benchmark
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  ArtifactBucket:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+  ArtifactPrefix:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$'
+  AbenchCommit:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{40}$'
+  ActivitySimCommit:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{40}$'
+  SharrowCommit:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{40}$'
+  Model:
+    Type: String
+    AllowedValues: [mtc-extended, sandag]
+  ModelCommit:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{40}$'
+  InstanceType:
+    Type: String
+    Default: r7i.16xlarge
+  Processes:
+    Type: Number
+    Default: 16
+    MinValue: 1
+  Memory:
+    Type: String
+    Default: 480g
+    AllowedPattern: '^[1-9][0-9]*[gGmM]$'
+  ShmSize:
+    Type: String
+    Default: 32g
+    AllowedPattern: '^[1-9][0-9]*[gGmM]$'
+  RootVolumeSize:
+    Type: Number
+    Default: 2048
+    MinValue: 100
+  RootVolumeIops:
+    Type: Number
+    Default: 6000
+    MinValue: 3000
+    MaxValue: 16000
+  RootVolumeThroughput:
+    Type: Number
+    Default: 500
+    MinValue: 125
+    MaxValue: 1000
+  UploadModelOutputs:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+Resources:
+  ReleaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Outbound-only access for an ActivitySim release run
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-release'
+
+  ReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: WriteReleaseArtifacts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetBucketLocation
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucket}'
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucket}'
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - !Sub '${ArtifactPrefix}/*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListMultipartUploadParts
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/*'
+
+  ReleaseInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref ReleaseRole]
+
+  ReleaseLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt ReleaseInstanceProfile.Arn
+        InstanceInitiatedShutdownBehavior: terminate
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true
+            DeviceIndex: 0
+            Groups: [!Ref ReleaseSecurityGroup]
+            SubnetId: !Ref SubnetId
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeType: gp3
+              VolumeSize: !Ref RootVolumeSize
+              Iops: !Ref RootVolumeIops
+              Throughput: !Ref RootVolumeThroughput
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AWS::StackName}-release'
+              - Key: Purpose
+                Value: ActivitySim full-scale release validation
+              - Key: Model
+                Value: !Ref Model
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub '${AWS::StackName}-release'
+        UserData:
+          Fn::Base64: !Sub |
+            #!/usr/bin/env bash
+            set -Eeuo pipefail
+            exec > >(tee -a /var/log/abench-release.log) 2>&1
+
+            artifact_uri='s3://${ArtifactBucket}/${ArtifactPrefix}'
+            finish() {
+              rc=$?
+              set +e
+              if command -v aws >/dev/null 2>&1; then
+                aws s3 cp /var/log/abench-release.log "$artifact_uri/abench-release.log" --only-show-errors
+              fi
+              shutdown -h now
+              return "$rc"
+            }
+            trap finish EXIT
+
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y awscli docker.io git python3-pip python3-venv
+            systemctl enable --now docker
+
+            install -d /opt/abench /work
+            git init -q /opt/abench
+            git -C /opt/abench remote add origin https://github.com/ActivitySim/abench.git
+            git -C /opt/abench fetch -q --depth 1 origin '${AbenchCommit}'
+            git -C /opt/abench -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+            test "$(git -C /opt/abench rev-parse HEAD)" = '${AbenchCommit}'
+
+            python3 -m venv /work/abench-venv
+            /work/abench-venv/bin/pip install --quiet --upgrade pip
+            /work/abench-venv/bin/pip install --quiet /opt/abench
+
+            cat >/etc/systemd/system/abench-release-watchdog.service <<'EOF'
+            [Unit]
+            Description=Terminate an overlong ActivitySim release host
+            [Service]
+            Type=oneshot
+            ExecStart=/sbin/shutdown -h now
+            EOF
+            cat >/etc/systemd/system/abench-release-watchdog.timer <<'EOF'
+            [Unit]
+            Description=18 hour limit for an ActivitySim release host
+            [Timer]
+            OnActiveSec=18h
+            Unit=abench-release-watchdog.service
+            [Install]
+            WantedBy=timers.target
+            EOF
+            systemctl daemon-reload
+            systemctl enable --now abench-release-watchdog.timer
+
+            upload_outputs=''
+            if [[ '${UploadModelOutputs}' == true ]]; then
+              upload_outputs=--upload-model-outputs
+            fi
+            /opt/abench/release/aws/run-model.sh \
+              --model '${Model}' \
+              --model-commit '${ModelCommit}' \
+              --artifact-uri "$artifact_uri" \
+              --activitysim-commit '${ActivitySimCommit}' \
+              --sharrow-commit '${SharrowCommit}' \
+              --processes '${Processes}' \
+              --memory '${Memory}' \
+              --shm-size '${ShmSize}' \
+              $upload_outputs
+
+  ReleaseInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ReleaseLaunchTemplate
+        Version: !GetAtt ReleaseLaunchTemplate.LatestVersionNumber
+
+Outputs:
+  InstanceId:
+    Value: !Ref ReleaseInstance
+  ArtifactUri:
+    Value: !Sub 's3://${ArtifactBucket}/${ArtifactPrefix}'
+  Model:
+    Value: !Ref Model
+  SessionCommand:
+    Value: !Sub 'aws ssm start-session --target ${ReleaseInstance} --region ${AWS::Region}'

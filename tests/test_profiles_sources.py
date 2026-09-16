@@ -77,8 +77,12 @@ def test_profiles_preflight_and_oversampling(tmp_path):
     (tmp_path / "data/households.csv").unlink()
     with pytest.raises(ValueError, match="missing required"):
         validate_model(profile, tmp_path, tmp_path / "data", 0)
-    for name in ("mtc", "sandag"):
+    for name in ("mtc", "mtc-extended", "sandag"):
         assert load_profile(name, tmp_path)["configs"]
+    extended = load_profile("mtc-extended", tmp_path)
+    assert extended["configs"] == ["ext-configs", "configs"]
+    assert extended["mp_configs"] == ["ext-configs_mp"]
+    assert extended["models_from"] == "ext-configs/settings.yaml"
 
 
 def test_config_overlay_and_process_precedence(tmp_path):

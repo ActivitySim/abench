@@ -47,7 +47,7 @@ def relative_path(value):
 def load_profile(value, root):
     """Load a model-owned YAML profile or one of the shipped example profiles."""
     path = Path(value).expanduser()
-    if value in ("mtc", "sandag"):
+    if value in ("mtc", "mtc-extended", "sandag"):
         path = Path(__file__).parent / "profiles" / f"{value}.yaml"
     elif not path.is_absolute():
         path = root / path
