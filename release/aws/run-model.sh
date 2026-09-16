@@ -10,9 +10,11 @@ Required:
   --model-commit SHA
   --artifact-uri S3_URI
   --activitysim-commit SHA
-  --sharrow-commit SHA
 
 Optional:
+  --sharrow / --no-sharrow   default: --sharrow
+  --sharrow-commit SHA       required only with --sharrow
+  --smoke-test               skip model data and verify AWS host plumbing
   --work-dir PATH             default: /work
   --processes N               default: 16
   --memory LIMIT              default: 480g
@@ -31,6 +33,8 @@ processes=16
 memory="480g"
 shm_size="32g"
 upload_model_outputs=false
+sharrow_enabled=true
+smoke_test=false
 
 while (($#)); do
   case "$1" in
@@ -39,6 +43,9 @@ while (($#)); do
     --artifact-uri) artifact_uri=${2:?}; shift 2 ;;
     --activitysim-commit) activitysim_commit=${2:?}; shift 2 ;;
     --sharrow-commit) sharrow_commit=${2:?}; shift 2 ;;
+    --sharrow) sharrow_enabled=true; shift ;;
+    --no-sharrow) sharrow_enabled=false; shift ;;
+    --smoke-test) smoke_test=true; shift ;;
     --work-dir) work_dir=${2:?}; shift 2 ;;
     --processes) processes=${2:?}; shift 2 ;;
     --memory) memory=${2:?}; shift 2 ;;
@@ -63,12 +70,20 @@ else
 fi
 
 commit_pattern='^[0-9a-fA-F]{40}$'
-for value in "$model_commit" "$activitysim_commit" "$sharrow_commit"; do
+for value in "$model_commit" "$activitysim_commit"; do
   if [[ ! $value =~ $commit_pattern ]]; then
     echo "All source revisions must be full 40-character commit SHAs" >&2
     exit 2
   fi
 done
+if [[ $sharrow_enabled == true && ! $sharrow_commit =~ $commit_pattern ]]; then
+  echo "--sharrow requires --sharrow-commit with a full commit SHA" >&2
+  exit 2
+fi
+if [[ -n $sharrow_commit && ! $sharrow_commit =~ $commit_pattern ]]; then
+  echo "All source revisions must be full 40-character commit SHAs" >&2
+  exit 2
+fi
 if [[ ! $artifact_uri =~ ^s3://[^/]+/.+ ]] || [[ ! $processes =~ ^[1-9][0-9]*$ ]]; then
   echo "Provide a non-root S3 artifact URI and a positive process count" >&2
   exit 2
@@ -111,6 +126,7 @@ write_status() {
   ARTIFACT_URI="$artifact_uri" ACTIVITYSIM_COMMIT="$activitysim_commit" \
   ABENCH_COMMIT="$abench_commit" SHARROW_COMMIT="$sharrow_commit" \
   PROCESSES="$processes" MEMORY="$memory" SHM_SIZE="$shm_size" \
+  SHARROW_ENABLED="$sharrow_enabled" SMOKE_TEST="$smoke_test" \
   VALIDATE_RC="$validate_rc" RUN_RC="$run_rc" POPULATION_RC="$population_rc" \
   python3 - <<'PY'
 import json
@@ -136,11 +152,13 @@ document = {
         "processes": int(os.environ["PROCESSES"]),
         "memory": os.environ["MEMORY"],
         "shm_size": os.environ["SHM_SIZE"],
+        "sharrow": os.environ["SHARROW_ENABLED"] == "true",
+        "smoke_test": os.environ["SMOKE_TEST"] == "true",
     },
     "commits": {
         "abench": os.environ["ABENCH_COMMIT"],
         "activitysim": os.environ["ACTIVITYSIM_COMMIT"],
-        "sharrow": os.environ["SHARROW_COMMIT"],
+        "sharrow": os.environ["SHARROW_COMMIT"] or None,
         "model": os.environ["MODEL_COMMIT"],
     },
     "validate_returncode": validate_rc,
@@ -169,19 +187,6 @@ git -C "$model" fetch -q --depth 1 origin "$model_commit"
 git -C "$model" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
 [[ $(git -C "$model" rev-parse HEAD) == "${model_commit,,}" ]]
 
-echo "Installing the pinned data-download environment"
-python3 -m venv "$work_dir/data-venv"
-"$work_dir/data-venv/bin/pip" install --quiet --upgrade pip
-"$work_dir/data-venv/bin/pip" install --quiet \
-  "activitysim @ git+https://github.com/ActivitySim/activitysim.git@$activitysim_commit" \
-  "sharrow @ git+https://github.com/ActivitySim/sharrow.git@$sharrow_commit" \
-  'wring>=0.0.6'
-"$work_dir/data-venv/bin/pip" freeze > "$metadata/data-download-pip-freeze.txt"
-
-echo "Downloading and verifying full-scale data for $model_name"
-"$work_dir/data-venv/bin/python" "$script_dir/prepare_data.py" \
-  "$model_name" "$model" --cache "$work_dir/data-cache"
-
 abench="$work_dir/abench-venv/bin/abench"
 if [[ ! -x $abench ]]; then
   python3 -m venv "$work_dir/abench-venv"
@@ -192,20 +197,77 @@ fi
 docker version > "$metadata/docker-version.txt"
 uname -a > "$metadata/uname.txt"
 
+check_source() {
+  local name=$1
+  local repository=$2
+  local commit=$3
+  local target="$work_dir/source-checkouts/$name"
+  git init -q "$target"
+  git -C "$target" remote add origin "$repository"
+  git -C "$target" fetch -q --depth 1 origin "$commit"
+  [[ $(git -C "$target" rev-parse FETCH_HEAD) == "${commit,,}" ]]
+}
+
+if [[ $smoke_test == true ]]; then
+  echo "Running AWS smoke checks for $model_name"
+  mkdir -p "$work_dir/source-checkouts"
+  check_source activitysim \
+    https://github.com/ActivitySim/activitysim.git "$activitysim_commit"
+  if [[ $sharrow_enabled == true ]]; then
+    check_source sharrow \
+      https://github.com/ActivitySim/sharrow.git "$sharrow_commit"
+  fi
+  "$abench" --help > "$metadata/abench-help.txt"
+  docker run --rm --platform linux/amd64 python:3.11-slim-bookworm \
+    python --version > >(tee "$metadata/docker-smoke.log") 2>&1
+  validate_rc=0
+  run_rc=0
+  population_rc=0
+  write_status complete 0
+  sync_artifacts
+  aws s3 cp "$status_path" "$artifact_uri/status.json" --only-show-errors
+  finalized=true
+  trap - EXIT
+  echo "AWS smoke checks passed for $model_name"
+  exit 0
+fi
+
+echo "Installing the pinned data-download environment"
+python3 -m venv "$work_dir/data-venv"
+"$work_dir/data-venv/bin/pip" install --quiet --upgrade pip
+download_packages=(
+  "activitysim @ git+https://github.com/ActivitySim/activitysim.git@$activitysim_commit"
+  'wring>=0.0.6'
+)
+if [[ $sharrow_enabled == true ]]; then
+  download_packages+=(
+    "sharrow @ git+https://github.com/ActivitySim/sharrow.git@$sharrow_commit"
+  )
+fi
+"$work_dir/data-venv/bin/pip" install --quiet "${download_packages[@]}"
+"$work_dir/data-venv/bin/pip" freeze > "$metadata/data-download-pip-freeze.txt"
+
+echo "Downloading and verifying full-scale data for $model_name"
+"$work_dir/data-venv/bin/python" "$script_dir/prepare_data.py" \
+  "$model_name" "$model" --cache "$work_dir/data-cache"
+
 common=(
   --model-dir "$model"
   --profile "$profile"
   --data-dir "$model/$data_name"
   --source "activitysim=ActivitySim/activitysim@$activitysim_commit"
-  --source "sharrow=ActivitySim/sharrow@$sharrow_commit"
   --multiprocess
   --processes "$processes"
-  --sharrow
   --households 0
   --memory "$memory"
   --shm-size "$shm_size"
   --platform linux/amd64
 )
+if [[ $sharrow_enabled == true ]]; then
+  common+=(--source "sharrow=ActivitySim/sharrow@$sharrow_commit" --sharrow)
+else
+  common+=(--no-sharrow)
+fi
 
 echo "Preflighting $model_name"
 set +e

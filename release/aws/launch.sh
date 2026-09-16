@@ -10,9 +10,11 @@ Required:
   --vpc-id ID
   --subnet-id ID
   --activitysim-commit SHA
-  --sharrow-commit SHA
 
 Optional:
+  --sharrow / --no-sharrow    default: --sharrow
+  --sharrow-commit SHA        required only with --sharrow
+  --smoke-test                test AWS plumbing without downloading model data
   --mtc-extended-commit SHA    default: latest activitysim-prototype-mtc/extended
   --sandag-commit SHA          default: latest sandag-abm3-example/main
   --abench-commit SHA          default: current checkout
@@ -44,19 +46,23 @@ mtc_extended_commit=""
 sandag_commit=""
 abench_commit=$(git -C "$repo_root" rev-parse HEAD)
 region=""
-prefix="activitysim-release/$timestamp"
-stack_base="abench-release-$timestamp"
-mtc_instance_type="r7i.16xlarge"
-sandag_instance_type="r7i.16xlarge"
-mtc_processes=16
-sandag_processes=16
-memory="480g"
-shm_size="32g"
-volume_size=2048
+prefix=""
+stack_base=""
+mtc_instance_type=""
+sandag_instance_type=""
+mtc_processes=""
+sandag_processes=""
+memory=""
+shm_size=""
+volume_size=""
+volume_iops=""
+volume_throughput=""
 upload_model_outputs=false
 wait_for_run=true
 keep_stacks=false
 abench_commit_explicit=false
+sharrow_enabled=true
+smoke_test=false
 
 while (($#)); do
   case "$1" in
@@ -65,6 +71,9 @@ while (($#)); do
     --subnet-id) subnet_id=${2:?}; shift 2 ;;
     --activitysim-commit) activitysim_commit=${2:?}; shift 2 ;;
     --sharrow-commit) sharrow_commit=${2:?}; shift 2 ;;
+    --sharrow) sharrow_enabled=true; shift ;;
+    --no-sharrow) sharrow_enabled=false; shift ;;
+    --smoke-test) smoke_test=true; shift ;;
     --mtc-extended-commit) mtc_extended_commit=${2:?}; shift 2 ;;
     --sandag-commit) sandag_commit=${2:?}; shift 2 ;;
     --abench-commit) abench_commit=${2:?}; abench_commit_explicit=true; shift 2 ;;
@@ -86,13 +95,47 @@ while (($#)); do
   esac
 done
 
+if [[ $smoke_test == true ]]; then
+  prefix=${prefix:-activitysim-smoke/$timestamp}
+  stack_base=${stack_base:-abench-smoke-$timestamp}
+  mtc_instance_type=${mtc_instance_type:-t3.small}
+  sandag_instance_type=${sandag_instance_type:-t3.small}
+  mtc_processes=${mtc_processes:-1}
+  sandag_processes=${sandag_processes:-1}
+  memory=${memory:-1g}
+  shm_size=${shm_size:-256m}
+  volume_size=${volume_size:-32}
+  volume_iops=3000
+  volume_throughput=125
+else
+  prefix=${prefix:-activitysim-release/$timestamp}
+  stack_base=${stack_base:-abench-release-$timestamp}
+  mtc_instance_type=${mtc_instance_type:-r7i.16xlarge}
+  sandag_instance_type=${sandag_instance_type:-r7i.16xlarge}
+  mtc_processes=${mtc_processes:-16}
+  sandag_processes=${sandag_processes:-16}
+  memory=${memory:-480g}
+  shm_size=${shm_size:-32g}
+  volume_size=${volume_size:-2048}
+  volume_iops=6000
+  volume_throughput=500
+fi
+
 commit_pattern='^[0-9a-fA-F]{40}$'
-for value in "$abench_commit" "$activitysim_commit" "$sharrow_commit"; do
+for value in "$abench_commit" "$activitysim_commit"; do
   if [[ ! $value =~ $commit_pattern ]]; then
     echo "Explicit revisions must be full 40-character commit SHAs" >&2
     exit 2
   fi
 done
+if [[ $sharrow_enabled == true && ! $sharrow_commit =~ $commit_pattern ]]; then
+  echo "--sharrow requires --sharrow-commit with a full commit SHA" >&2
+  exit 2
+fi
+if [[ -n $sharrow_commit && ! $sharrow_commit =~ $commit_pattern ]]; then
+  echo "Explicit revisions must be full 40-character commit SHAs" >&2
+  exit 2
+fi
 for value in "$mtc_extended_commit" "$sandag_commit"; do
   if [[ -n $value && ! $value =~ $commit_pattern ]]; then
     echo "Explicit revisions must be full 40-character commit SHAs" >&2
@@ -195,6 +238,8 @@ deploy_model() {
       AbenchCommit="$abench_commit" \
       ActivitySimCommit="$activitysim_commit" \
       SharrowCommit="$sharrow_commit" \
+      SharrowEnabled="$sharrow_enabled" \
+      SmokeTest="$smoke_test" \
       Model="$model" \
       ModelCommit="${commits[$model]}" \
       InstanceType="${instance_types[$model]}" \
@@ -202,6 +247,8 @@ deploy_model() {
       Memory="$memory" \
       ShmSize="$shm_size" \
       RootVolumeSize="$volume_size" \
+      RootVolumeIops="$volume_iops" \
+      RootVolumeThroughput="$volume_throughput" \
       UploadModelOutputs="$upload_model_outputs" \
     --no-fail-on-empty-changeset || return
 

@@ -102,8 +102,8 @@ fi
             "subnet-test",
             "--activitysim-commit",
             sha,
-            "--sharrow-commit",
-            sha,
+            "--no-sharrow",
+            "--smoke-test",
             "--no-wait",
         ],
         capture_output=True,
@@ -114,6 +114,14 @@ fi
     calls = log.read_text().splitlines()
     deployments = [line for line in calls if "cloudformation deploy" in line]
     assert len(deployments) == 2
+    assert all(
+        "SharrowEnabled=false" in line
+        and "SmokeTest=true" in line
+        and "InstanceType=t3.small" in line
+        and "Processes=1" in line
+        and "RootVolumeSize=32" in line
+        for line in deployments
+    )
     assert any(
         "Model=mtc-extended" in line and f"ModelCommit={'b' * 40}" in line
         for line in deployments
@@ -122,3 +130,104 @@ fi
         "Model=sandag" in line and f"ModelCommit={'c' * 40}" in line
         for line in deployments
     )
+
+    log.write_text("")
+    full = subprocess.run(
+        [
+            HERE / "launch.sh",
+            "--bucket",
+            "test-bucket",
+            "--vpc-id",
+            "vpc-test",
+            "--subnet-id",
+            "subnet-test",
+            "--activitysim-commit",
+            sha,
+            "--sharrow-commit",
+            sha,
+            "--no-wait",
+        ],
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    assert full.returncode == 0, full.stderr
+    full_deployments = [
+        line for line in log.read_text().splitlines() if "cloudformation deploy" in line
+    ]
+    assert len(full_deployments) == 2
+    assert all(
+        "SharrowEnabled=true" in line
+        and "SmokeTest=false" in line
+        and "InstanceType=r7i.16xlarge" in line
+        and "RootVolumeSize=2048" in line
+        for line in full_deployments
+    )
+
+
+def test_model_runner_smoke_test_without_sharrow(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sha = "a" * 40
+    git = bin_dir / "git"
+    git.write_text(
+        f"""#!/usr/bin/env bash
+if [[ $1 == init ]]; then
+  mkdir -p "${{@: -1}}"
+elif [[ " $* " == *" rev-parse "* ]]; then
+  printf '%s\\n' '{sha}'
+fi
+"""
+    )
+    git.chmod(0o755)
+    docker = bin_dir / "docker"
+    docker.write_text("#!/usr/bin/env bash\nprintf 'docker smoke ok\\n'\n")
+    docker.chmod(0o755)
+    aws_log = tmp_path / "aws.log"
+    aws = bin_dir / "aws"
+    aws.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >>"$AWS_LOG"\n')
+    aws.chmod(0o755)
+
+    work = tmp_path / "work"
+    venv_bin = work / "abench-venv/bin"
+    venv_bin.mkdir(parents=True)
+    abench = venv_bin / "abench"
+    abench.write_text("#!/usr/bin/env bash\nprintf 'abench smoke ok\\n'\n")
+    abench.chmod(0o755)
+    pip = venv_bin / "pip"
+    pip.write_text("#!/usr/bin/env bash\nprintf 'abench==test\\n'\n")
+    pip.chmod(0o755)
+
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        AWS_LOG=str(aws_log),
+    )
+    result = subprocess.run(
+        [
+            HERE / "run-model.sh",
+            "--model",
+            "sandag",
+            "--model-commit",
+            sha,
+            "--artifact-uri",
+            "s3://test-bucket/smoke/sandag",
+            "--activitysim-commit",
+            sha,
+            "--no-sharrow",
+            "--smoke-test",
+            "--work-dir",
+            work,
+        ],
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    status = json.loads((work / "status.json").read_text())
+    assert status["success"] is True
+    assert status["configuration"]["smoke_test"] is True
+    assert status["configuration"]["sharrow"] is False
+    assert status["commits"]["sharrow"] is None
+    assert "s3 sync" in aws_log.read_text()
+    assert "s3 cp" in aws_log.read_text()

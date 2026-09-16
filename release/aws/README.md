@@ -7,9 +7,9 @@ downloads only its own checksummed public data, runs its benchmark, writes
 durable artifacts to an existing S3 bucket, and terminates.
 
 The stacks run concurrently and do not share compute, storage, or failure state.
-A failed MTC Extended run does not prevent SANDAG from completing. Sharrow mode
-performs a complete warmup followed by the measured run, so each model is run
-twice on its own host.
+A failed MTC Extended run does not prevent SANDAG from completing. Sharrow is a
+launch-time choice. When enabled, it performs a complete warmup followed by the
+measured run, so each model is run twice on its own host.
 
 ## Prerequisites
 
@@ -39,6 +39,18 @@ Pass full 40-character commit SHAs for ActivitySim and Sharrow:
   --subnet-id subnet-0123456789abcdef0 \
   --activitysim-commit <ACTIVITYSIM_SHA> \
   --sharrow-commit <SHARROW_SHA>
+```
+
+Sharrow is enabled by default and requires `--sharrow-commit`. To run the legacy
+implementation instead, disable it and omit that commit:
+
+```bash
+./release/aws/launch.sh \
+  --bucket my-release-artifacts \
+  --vpc-id vpc-0123456789abcdef0 \
+  --subnet-id subnet-0123456789abcdef0 \
+  --activitysim-commit <ACTIVITYSIM_SHA> \
+  --no-sharrow
 ```
 
 By default, the launcher resolves the latest
@@ -76,6 +88,34 @@ Useful overrides include:
 Each host defaults to 16 worker processes, a `480g` container limit, `32g` shared
 memory, and its own 2 TiB encrypted gp3 root volume. This leaves memory for the
 host and Docker. Each volume is deleted with its instance.
+
+## AWS smoke test
+
+Before paying for full-scale instances, run the same two-stack bootstrap in smoke
+mode:
+
+```bash
+./release/aws/launch.sh \
+  --bucket my-release-artifacts \
+  --vpc-id vpc-0123456789abcdef0 \
+  --subnet-id subnet-0123456789abcdef0 \
+  --activitysim-commit <ACTIVITYSIM_SHA> \
+  --no-sharrow \
+  --smoke-test
+```
+
+Smoke mode defaults each stack to a `t3.small`, one process, and a 32 GiB gp3
+volume. It verifies cloud-init package installation, the abench and model
+checkouts, the pinned ActivitySim checkout, Docker image execution, instance-role
+access to the artifact prefix, status upload, shutdown, and stack cleanup. It
+does not install ActivitySim, download either full dataset, or run a model. With
+`--sharrow --sharrow-commit <SHA>`, it also verifies that the pinned Sharrow
+revision can be fetched.
+
+Smoke results use `activitysim-smoke/<timestamp>/` by default and have the same
+separate `mtc-extended/` and `sandag/` status layout as a release. Explicit
+instance, process, volume, prefix, and stack-name options override smoke defaults.
+Successful smoke statuses have `configuration.smoke_test: true`.
 
 The launcher prints both instance IDs. While either is running, connect without
 SSH:
@@ -116,7 +156,7 @@ the model repository pin as appropriate before the release run.
 ## Failure recovery
 
 Each instance uploads a failure `status.json` and diagnostics when its runner can
-do so, then shuts down. A systemd watchdog also terminates it after 36 hours.
+do so, then shuts down. A systemd watchdog also terminates it after 18 hours.
 Failures before the AWS CLI is installed may not reach S3; the launcher detects a
 terminated instance without a status object and reports that condition. A stack
 missing status is retained for diagnosis. Use its EC2 system log or

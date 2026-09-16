@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: One ephemeral host for a full-scale ActivitySim model benchmark
+Description: One ephemeral host for an ActivitySim release benchmark or smoke test
 
 Parameters:
   VpcId:
@@ -20,7 +20,16 @@ Parameters:
     AllowedPattern: '^[0-9a-fA-F]{40}$'
   SharrowCommit:
     Type: String
-    AllowedPattern: '^[0-9a-fA-F]{40}$'
+    Default: ''
+    AllowedPattern: '^$|^[0-9a-fA-F]{40}$'
+  SharrowEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  SmokeTest:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
   Model:
     Type: String
     AllowedValues: [mtc-extended, sandag]
@@ -45,7 +54,7 @@ Parameters:
   RootVolumeSize:
     Type: Number
     Default: 2048
-    MinValue: 100
+    MinValue: 30
   RootVolumeIops:
     Type: Number
     Default: 6000
@@ -152,6 +161,8 @@ Resources:
                 Value: ActivitySim full-scale release validation
               - Key: Model
                 Value: !Ref Model
+              - Key: SmokeTest
+                Value: !Ref SmokeTest
           - ResourceType: volume
             Tags:
               - Key: Name
@@ -213,16 +224,23 @@ Resources:
             if [[ '${UploadModelOutputs}' == true ]]; then
               upload_outputs=--upload-model-outputs
             fi
+            sharrow_options=--no-sharrow
+            if [[ '${SharrowEnabled}' == true ]]; then
+              sharrow_options="--sharrow --sharrow-commit ${SharrowCommit}"
+            fi
+            smoke_option=''
+            if [[ '${SmokeTest}' == true ]]; then
+              smoke_option=--smoke-test
+            fi
             /opt/abench/release/aws/run-model.sh \
               --model '${Model}' \
               --model-commit '${ModelCommit}' \
               --artifact-uri "$artifact_uri" \
               --activitysim-commit '${ActivitySimCommit}' \
-              --sharrow-commit '${SharrowCommit}' \
               --processes '${Processes}' \
               --memory '${Memory}' \
               --shm-size '${ShmSize}' \
-              $upload_outputs
+              $upload_outputs $sharrow_options $smoke_option
 
   ReleaseInstance:
     Type: AWS::EC2::Instance
