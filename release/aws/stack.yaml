@@ -187,8 +187,13 @@ Resources:
 
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y awscli docker.io git python3-pip python3-venv
+            apt-get install -y docker.io git python3-pip python3-venv unzip curl
             systemctl enable --now docker
+
+            curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+            unzip -q /tmp/awscliv2.zip -d /tmp
+            /tmp/aws/install
+            rm -rf /tmp/awscliv2.zip /tmp/aws
 
             install -d /opt/abench /work
             git init -q /opt/abench
