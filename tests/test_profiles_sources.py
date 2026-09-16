@@ -101,6 +101,7 @@ def test_config_overlay_and_process_precedence(tmp_path):
         multiprocess=True,
         processes=4,
         sharrow=False,
+        use_explicit_error_terms=False,
         config_overlay=[str(overlay)],
     )
     state = make_state(spec, phase, tmp_path, tmp_path / "data", tmp_path)
