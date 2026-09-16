@@ -74,6 +74,13 @@ def parser():
     p.add_argument("--processes", type=int, help="required for --multiprocess")
     p.add_argument("--sharrow", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument(
+        "--eet",
+        dest="use_explicit_error_terms",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="use_explicit_error_terms",
+    )
+    p.add_argument(
         "--households", type=int, default=1000, help="0 means full population"
     )
     p.add_argument("--data-dir", type=Path, default=None)

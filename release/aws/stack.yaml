@@ -26,6 +26,10 @@ Parameters:
     Type: String
     Default: 'true'
     AllowedValues: ['true', 'false']
+  UseExplicitErrorTerms:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
   SmokeTest:
     Type: String
     Default: 'false'
@@ -233,6 +237,10 @@ Resources:
             if [[ '${SharrowEnabled}' == true ]]; then
               sharrow_options="--sharrow --sharrow-commit ${SharrowCommit}"
             fi
+            eet_option=--no-use-explicit-error-terms
+            if [[ '${UseExplicitErrorTerms}' == true ]]; then
+              eet_option=--use-explicit-error-terms
+            fi
             smoke_option=''
             if [[ '${SmokeTest}' == true ]]; then
               smoke_option=--smoke-test
@@ -245,7 +253,7 @@ Resources:
               --processes '${Processes}' \
               --memory '${Memory}' \
               --shm-size '${ShmSize}' \
-              $upload_outputs $sharrow_options $smoke_option
+              $upload_outputs $sharrow_options $eet_option $smoke_option
 
   ReleaseInstance:
     Type: AWS::EC2::Instance

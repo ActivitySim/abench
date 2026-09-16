@@ -26,7 +26,10 @@ def make_state(
     data_root=Path("/data"),
     results_root=Path("/results"),
 ):
-    """Resolve model configs < profile defaults < overlays < explicit CLI controls.
+    """Resolve model configs < profile defaults < sharrow defaults < overlays < explicit CLI controls.
+
+    sharrow_settings only apply when this run has Sharrow enabled, mirroring how a
+    model's own sharrow-only config overlay would apply in a non-abench invocation.
 
     A generated inheriting config carries defaults through worker reconstruction;
     direct settings overrides are reserved for the experiment's required controls.
@@ -37,6 +40,8 @@ def make_state(
 
     profile = spec["profile"]
     defaults = dict(profile.get("settings", {}))
+    if spec["sharrow"]:
+        defaults.update(profile.get("sharrow_settings", {}))
     if profile.get("models_from"):
         base = yaml.safe_load((model_root / profile["models_from"]).read_text())
         defaults["models"] = [
@@ -71,6 +76,7 @@ def make_state(
             multiprocess=spec["multiprocess"],
             num_processes=spec["processes"],
             sharrow="require" if spec["sharrow"] else False,
+            use_explicit_error_terms=spec["use_explicit_error_terms"],
             fail_fast=True,
         ),
     )

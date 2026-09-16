@@ -17,6 +17,7 @@ FIELDS = {
     "extensions",
     "adapter",
     "settings",
+    "sharrow_settings",
     "models_from",
     "exclude_models",
     "mp_settings",
@@ -75,8 +76,9 @@ def load_profile(value, root):
             not isinstance(v, str) for v in profile.get(key, [])
         ):
             raise ValueError(f"{key} must be a list of strings")
-    if not isinstance(profile.get("settings", {}), dict):
-        raise ValueError("settings must be a mapping")
+    for key in ("settings", "sharrow_settings"):
+        if not isinstance(profile.get(key, {}), dict):
+            raise ValueError(f"{key} must be a mapping")
     if profile.get("adapter") and (
         not isinstance(profile["adapter"], str) or profile["adapter"].count(":") != 1
     ):

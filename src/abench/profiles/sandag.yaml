@@ -11,6 +11,7 @@ settings:
   checkpoints: true
   rng_base_seed: 0
   benchmarking: false
+sharrow_settings:
   recode_pipeline_columns: true
 exclude_models:
 - track_skim_usage

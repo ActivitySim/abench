@@ -14,6 +14,7 @@ Required:
 Optional:
   --sharrow / --no-sharrow   default: --sharrow
   --sharrow-commit SHA       required only with --sharrow
+  --eet / --no-eet           use_explicit_error_terms; default: --no-eet
   --smoke-test               skip model data and verify AWS host plumbing
   --work-dir PATH             default: /work
   --processes N               default: 16
@@ -34,6 +35,7 @@ memory="480g"
 shm_size="32g"
 upload_model_outputs=false
 sharrow_enabled=true
+use_explicit_error_terms=false
 smoke_test=false
 
 while (($#)); do
@@ -45,6 +47,8 @@ while (($#)); do
     --sharrow-commit) sharrow_commit=${2:?}; shift 2 ;;
     --sharrow) sharrow_enabled=true; shift ;;
     --no-sharrow) sharrow_enabled=false; shift ;;
+    --eet) use_explicit_error_terms=true; shift ;;
+    --no-eet) use_explicit_error_terms=false; shift ;;
     --smoke-test) smoke_test=true; shift ;;
     --work-dir) work_dir=${2:?}; shift 2 ;;
     --processes) processes=${2:?}; shift 2 ;;
@@ -126,7 +130,8 @@ write_status() {
   ARTIFACT_URI="$artifact_uri" ACTIVITYSIM_COMMIT="$activitysim_commit" \
   ABENCH_COMMIT="$abench_commit" SHARROW_COMMIT="$sharrow_commit" \
   PROCESSES="$processes" MEMORY="$memory" SHM_SIZE="$shm_size" \
-  SHARROW_ENABLED="$sharrow_enabled" SMOKE_TEST="$smoke_test" \
+  SHARROW_ENABLED="$sharrow_enabled" USE_EXPLICIT_ERROR_TERMS="$use_explicit_error_terms" \
+  SMOKE_TEST="$smoke_test" \
   VALIDATE_RC="$validate_rc" RUN_RC="$run_rc" POPULATION_RC="$population_rc" \
   python3 - <<'PY'
 import json
@@ -153,6 +158,7 @@ document = {
         "memory": os.environ["MEMORY"],
         "shm_size": os.environ["SHM_SIZE"],
         "sharrow": os.environ["SHARROW_ENABLED"] == "true",
+        "use_explicit_error_terms": os.environ["USE_EXPLICIT_ERROR_TERMS"] == "true",
         "smoke_test": os.environ["SMOKE_TEST"] == "true",
     },
     "commits": {
@@ -267,6 +273,11 @@ if [[ $sharrow_enabled == true ]]; then
   common+=(--source "sharrow=ActivitySim/sharrow@$sharrow_commit" --sharrow)
 else
   common+=(--no-sharrow)
+fi
+if [[ $use_explicit_error_terms == true ]]; then
+  common+=(--eet)
+else
+  common+=(--no-eet)
 fi
 
 echo "Preflighting $model_name"

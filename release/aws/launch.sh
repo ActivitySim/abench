@@ -14,6 +14,7 @@ Required:
 Optional:
   --sharrow / --no-sharrow    default: --sharrow
   --sharrow-commit SHA        required only with --sharrow
+  --eet / --no-eet             use_explicit_error_terms; default: --no-eet
   --smoke-test                test AWS plumbing without downloading model data
   --mtc-extended-commit SHA    default: latest activitysim-prototype-mtc/extended
   --sandag-commit SHA          default: latest sandag-abm3-example/main
@@ -62,6 +63,7 @@ wait_for_run=true
 keep_stacks=false
 abench_commit_explicit=false
 sharrow_enabled=true
+use_explicit_error_terms=false
 smoke_test=false
 
 while (($#)); do
@@ -73,6 +75,8 @@ while (($#)); do
     --sharrow-commit) sharrow_commit=${2:?}; shift 2 ;;
     --sharrow) sharrow_enabled=true; shift ;;
     --no-sharrow) sharrow_enabled=false; shift ;;
+    --eet) use_explicit_error_terms=true; shift ;;
+    --no-eet) use_explicit_error_terms=false; shift ;;
     --smoke-test) smoke_test=true; shift ;;
     --mtc-extended-commit) mtc_extended_commit=${2:?}; shift 2 ;;
     --sandag-commit) sandag_commit=${2:?}; shift 2 ;;
@@ -148,10 +152,8 @@ if [[ -z $bucket || -z $vpc_id || -z $subnet_id ]]; then
   exit 2
 fi
 if [[ $abench_commit_explicit != true ]] &&
-  [[ -n $(git -C "$repo_root" status --porcelain -- \
-    release/aws src/abench/profiles/mtc-extended.yaml \
-    src/abench/profiles.py src/abench/experiments.py) ]]; then
-  echo "The AWS runner or mtc-extended profile has uncommitted changes." >&2
+  [[ -n $(git -C "$repo_root" status --porcelain -- release/aws src/abench) ]]; then
+  echo "The AWS runner or abench package has uncommitted changes." >&2
   echo "Commit and push them, or pass a known pushed --abench-commit SHA." >&2
   exit 2
 fi
@@ -239,6 +241,7 @@ deploy_model() {
       ActivitySimCommit="$activitysim_commit" \
       SharrowCommit="$sharrow_commit" \
       SharrowEnabled="$sharrow_enabled" \
+      UseExplicitErrorTerms="$use_explicit_error_terms" \
       SmokeTest="$smoke_test" \
       Model="$model" \
       ModelCommit="${commits[$model]}" \

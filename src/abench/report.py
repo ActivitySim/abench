@@ -254,6 +254,7 @@ def experiment_card(run, xmax, ymax):
             "multiprocess",
             "processes",
             "sharrow",
+            "use_explicit_error_terms",
             "households",
             "data_dir",
             "output_dir",
