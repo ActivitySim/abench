@@ -38,6 +38,7 @@ snapshot:
 - ext-configs
 - ext-configs_mp
 - configs
+- data_model
 data_dir: data_full
 models_from: ext-configs/settings.yaml
 zone_label: zones
