@@ -201,9 +201,9 @@ def inferred_outcomes(component, table, columns, new_columns):
 
 
 def inferred_segments(outcomes, columns):
-    return [
-        name for name in AUTO_SEGMENTS if name in columns and name not in outcomes
-    ][:1]
+    return [name for name in AUTO_SEGMENTS if name in columns and name not in outcomes][
+        :1
+    ]
 
 
 def add_counts(target, series):
@@ -307,7 +307,9 @@ def component_summary(output, profile=None):
                     if rule is None and not store.changed(table, component, previous):
                         continue
                     columns = store.columns(table, component)
-                    previous_columns = store.columns(table, previous) if previous else []
+                    previous_columns = (
+                        store.columns(table, previous) if previous else []
+                    )
                     new_columns = [c for c in columns if c not in previous_columns]
                     if rule:
                         requested = (
@@ -356,12 +358,12 @@ def component_summary(output, profile=None):
                         frame = apply_filters(frame, filters)
                         add_frame(table_result, frame, outcomes, segments)
                     else:
-                        table_result["rows"] = table_result.get(
-                            "rows", 0
-                        ) + store.rows(table, component)
-                        table_result["partitions"] = table_result.get(
-                            "partitions", 0
-                        ) + 1
+                        table_result["rows"] = table_result.get("rows", 0) + store.rows(
+                            table, component
+                        )
+                        table_result["partitions"] = (
+                            table_result.get("partitions", 0) + 1
+                        )
         finally:
             store.close()
     finalize_counts(result, category_limit)

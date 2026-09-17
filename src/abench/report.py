@@ -246,7 +246,9 @@ def outcome_keys(runs):
     """Preserve first-appearance order across runs, mirroring component ordering."""
     keys = []
     for run in runs:
-        for component, cdata in run["component_summaries"].get("components", {}).items():
+        for component, cdata in (
+            run["component_summaries"].get("components", {}).items()
+        ):
             for table, tdata in cdata.get("tables", {}).items():
                 for outcome in tdata.get("outcomes", {}):
                     key = (component, table, outcome)
@@ -258,7 +260,10 @@ def outcome_keys(runs):
 def outcome_data(run, key):
     component, table, outcome = key
     tables = (
-        run["component_summaries"].get("components", {}).get(component, {}).get("tables", {})
+        run["component_summaries"]
+        .get("components", {})
+        .get(component, {})
+        .get("tables", {})
     )
     return tables.get(table, {}).get("outcomes", {}).get(outcome)
 
@@ -274,7 +279,9 @@ def outcome_categories(runs, key):
 
 
 def outcome_totals(runs, key):
-    return [sum((outcome_data(run, key) or {}).get("counts", {}).values()) for run in runs]
+    return [
+        sum((outcome_data(run, key) or {}).get("counts", {}).values()) for run in runs
+    ]
 
 
 def outcome_table(runs, key, categories):
@@ -319,7 +326,7 @@ def outcome_chart(runs, key, categories):
                 width = share * 5.3
                 rows.append(
                     f'<rect x="310" y="{y}" width="{width:.2f}" height="12" fill="{COLORS[i % len(COLORS)]}">'
-                    f'<title>{escape(run["spec"]["label"])}: {count:,} ({share:.1f}%)</title></rect>'
+                    f"<title>{escape(run['spec']['label'])}: {count:,} ({share:.1f}%)</title></rect>"
                 )
             y += 17
         y += 10
@@ -358,15 +365,15 @@ def numeric_chart(runs, key):
             hi_x = 310 + (value["max"] - minimum) * scale
             rows.append(
                 f'<rect x="{mean_x - 2:.2f}" y="{y}" width="4" height="12" fill="{COLORS[i % len(COLORS)]}">'
-                f'<title>{escape(run["spec"]["label"])}: mean {value["mean"]:.3f}, '
-                f'range [{value["min"]:.3f}, {value["max"]:.3f}]</title></rect>'
+                f"<title>{escape(run['spec']['label'])}: mean {value['mean']:.3f}, "
+                f"range [{value['min']:.3f}, {value['max']:.3f}]</title></rect>"
                 f'<path d="M {lo_x:.2f} {y + 6} H {hi_x:.2f}" stroke="#222"/>'
             )
         y += 17
     return (
         f'<svg viewBox="0 0 900 {y + 20}" role="img" aria-label="Outcome numeric range">'
         f'<text x="310" y="18">{minimum:.2f}</text><text x="790" y="18">{maximum:.2f}</text>'
-        f'{"".join(rows)}</svg>'
+        f"{''.join(rows)}</svg>"
     )
 
 
@@ -382,7 +389,9 @@ def summary_table(runs, key):
         cells = []
         for run in runs:
             data = outcome_data(run, key)
-            cells.append(f"<td>{data[stat]:,}</td>" if data and stat in data else "<td>—</td>")
+            cells.append(
+                f"<td>{data[stat]:,}</td>" if data and stat in data else "<td>—</td>"
+            )
         rows.append(f"<tr><th>{label}</th>{''.join(cells)}</tr>")
     return f"<table><tr><th>Statistic</th>{headers}</tr>{''.join(rows)}</table>"
 
@@ -414,7 +423,9 @@ def outcomes_section(runs):
         else:
             body = summary_table(runs, key)
         style = "" if index == 0 else "display:none"
-        panels.append(f'<div class="outcome-panel" id="{anchor}" style="{style}">{body}</div>')
+        panels.append(
+            f'<div class="outcome-panel" id="{anchor}" style="{style}">{body}</div>'
+        )
     return (
         "<h2>Component outcomes</h2>"
         "<p>Model choice distributions recovered from ActivitySim checkpoints, merged across "
@@ -618,7 +629,8 @@ highlightComponent();
 """
     outcomes_html = outcomes_section(runs)
     # Outcome labels live only in escaped HTML attributes/text, never in JS.
-    outcomes_script = """
+    outcomes_script = (
+        """
 <script>
 const outcomeSelect = document.getElementById('outcome-select');
 const outcomesSection = document.getElementById('outcomes-section');
@@ -638,7 +650,10 @@ if (outcomeSelect) {
   });
 }
 </script>
-""" if outcomes_html else ""
+"""
+        if outcomes_html
+        else ""
+    )
     document = f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>abench report</title>
 <style>body{{font:15px system-ui;margin:2rem;color:#17212b}}.cards{{display:flex;gap:24px;overflow-x:auto}}article{{flex:1;min-width:420px;border:1px solid #ccc;padding:16px}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}}svg{{width:100%;min-width:420px}}table{{border-collapse:collapse;width:100%}}th,td{{padding:10px;text-align:left;border-bottom:1px solid #ddd}}.fastest{{background:#d7f3dc}}small{{color:#58616a}}.runtime{{max-width:1200px}}.scroll{{overflow-x:auto}}.outcome-toggle button{{margin-left:4px;border:1px solid #ccc;background:#f4f6f8;padding:4px 10px;border-radius:4px;cursor:pointer}}.outcome-toggle button.active{{background:#0072b2;color:#fff;border-color:#0072b2}}.plot-view{{display:none}}#outcomes-section.plot-mode .table-view{{display:none}}#outcomes-section.plot-mode .plot-view{{display:block}}</style>
 <h1>abench report</h1><p>Whole-container cgroup v2 memory counts shared pages once, including file cache, kernel memory and the supervisor. Swap is recorded separately in memory.csv. Cache preparation and post-run summaries are excluded. Peak is the kernel high-water mark sampled during the model lifetime, including container startup. Memory panels use identical axes.</p>

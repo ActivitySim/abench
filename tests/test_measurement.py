@@ -289,8 +289,7 @@ assert.ok(panels.every(p => p.bands.every(b => b.style.display === 'none')));
             ]
             for worker_number, frame in enumerate(partitions):
                 pipeline = (
-                    output
-                    / f"mp_households_{worker_number}-pipeline.parquetpipeline"
+                    output / f"mp_households_{worker_number}-pipeline.parquetpipeline"
                 )
                 (pipeline / "trips").mkdir(parents=True)
                 frame[["primary_purpose"]].to_parquet(pipeline / "trips/seed.parquet")
