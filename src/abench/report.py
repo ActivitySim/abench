@@ -129,6 +129,7 @@ def load_run(directory):
     status = read_json(phase / "status.json", {})
     docker = read_json(phase / "docker-state.json", {})
     outputs = read_json(phase / "output-summary.json", {})
+    component_summaries = read_json(phase / "component-summary.json", {})
     requested = spec.get("households", 0)
     sample_matches = (
         not requested or outputs.get("households", {}).get("rows") == requested
@@ -151,6 +152,7 @@ def load_run(directory):
         "valid": valid,
         "inputs": read_json(phase / "input-summary.json", {}),
         "outputs": outputs,
+        "component_summaries": component_summaries,
         "peak": max((r["peak_bytes"] for r in memory), default=0),
         "docker": docker,
         "path": str(directory),
@@ -301,6 +303,7 @@ def experiment_card(run, xmax, ymax):
             ("Complete settings and provenance", spec),
             ("Input totals and categories", run["inputs"]),
             ("Output totals and categories", run["outputs"]),
+            ("Component outcome summaries", run["component_summaries"]),
             ("Container exit and OOM status", run["docker"]),
         )
     )

@@ -190,6 +190,7 @@ required_inputs:
 settings:
   use_shadow_pricing: false
   rng_base_seed: 0
+  checkpoints: true
 input_tables:
   households: {}
   persons: {}
@@ -224,6 +225,8 @@ Optional profile fields:
 | `extensions` | Import modules through ActivitySim's registration mechanism, including spawned workers. Installing a package alone does not register its components. |
 | `adapter: module:function` | Optional `function(state, spec, phase)` initialization hook, called once in the model parent before execution. Use `state.import_extensions` for worker setup; parent-only mutations are not automatically worker initialization. |
 | `input_tables`, `output_tables` | Logical table names mapped to summary options: `file` (stem), `totals`, `categories`, and `zone_columns` for land use. CSV and Parquet are supported. Use logical `households` for sample validation. |
+| `component_summaries` | Optional model-name patterns mapped to `table`, `outcomes`, `segments`, and equality `filters`; overrides automatic outcome detection. Use `false` to omit a step. |
+| `component_summary_category_limit` | Maximum distinct values (default 100) retained as exact counts; higher-cardinality numeric choices retain count, nulls, distinct count, min, max, sum, and mean. |
 | `output_prefix` | Default `final_`; applied to output file stems. |
 | `household_table` | Default `households.csv`, used for early CSV sample validation. Parquet samples are checked after execution. |
 | `zone_label` | Display label for land-use rows, such as zones or MAZs. |
@@ -253,6 +256,31 @@ Overall elapsed includes startup, coordination, and checkpoint writes between
 components. Kernel peak includes startup; warmup and post-run summaries are
 excluded. Shared VM page-cache ownership can influence container charges: this
 is not a cold-input I/O benchmark.
+
+After sampling stops, abench also reads ActivitySim's checkpoints into
+`component-summary.json`. For each model step it records the affected table row
+count and compact outcome distributions; worker partitions are merged. Common
+ActivitySim names are detected automatically (for example, `trip_mode` grouped
+by `primary_purpose`, and `tour_mode` grouped by `tour_type`). A model profile can
+make a nonstandard component exact:
+
+```yaml
+component_summaries:
+  my_mode_model:
+    table: trips
+    outcomes: [chosen_mode]
+    segments: [purpose]
+    filters:
+      modeled: true
+  diagnostic_*: false
+```
+
+Initialization, multiprocess coordinator, and summarize steps are omitted. The
+summary is outside runtime and memory measurement, but it requires per-model
+ActivitySim checkpoints to exist (`checkpoints: true`, as in the built-in
+profiles). Automatic counts cover non-null outcome rows in the checkpointed
+table; specify `filters` when a model pre-populates outcomes for non-choosers.
+Full model outputs and checkpoints remain untouched.
 
 ```bash
 abench report --compare /path/to/run-a /path/to/run-b \

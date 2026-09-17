@@ -13,9 +13,12 @@ import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pandas as pd
+
 from abench import report as benchmark
 from abench.cli import commit, positive
 from abench.runtime import worker
+from abench.runtime.component_summary import component_summary
 
 benchmark.commit = commit
 benchmark.positive = positive
@@ -264,6 +267,103 @@ assert.ok(panels.every(p => p.bands.every(b => b.style.display === 'none')));
             self.assertEqual(
                 summary["trips"]["categories"]["trip_mode"], {"WALK": 2, "SOV": 1}
             )
+
+    def test_post_run_component_summaries_merge_worker_segments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            partitions = [
+                pd.DataFrame(
+                    {
+                        "primary_purpose": ["work", "work", "school"],
+                        "trip_mode": ["SOV", "WALK", "WALK"],
+                    },
+                    index=pd.Index([1, 2, 3], name="trip_id"),
+                ),
+                pd.DataFrame(
+                    {
+                        "primary_purpose": ["work", "school"],
+                        "trip_mode": ["SOV", "BIKE"],
+                    },
+                    index=pd.Index([4, 5], name="trip_id"),
+                ),
+            ]
+            for worker_number, frame in enumerate(partitions):
+                pipeline = (
+                    output
+                    / f"mp_households_{worker_number}-pipeline.parquetpipeline"
+                )
+                (pipeline / "trips").mkdir(parents=True)
+                frame[["primary_purpose"]].to_parquet(pipeline / "trips/seed.parquet")
+                frame.to_parquet(pipeline / "trips/trip_mode_choice.parquet")
+                pd.DataFrame(
+                    [
+                        {
+                            "checkpoint_name": "mp_seed",
+                            "timestamp": "now",
+                            "trips": "seed",
+                        },
+                        {
+                            "checkpoint_name": "trip_mode_choice",
+                            "timestamp": "now",
+                            "trips": "trip_mode_choice",
+                        },
+                        {
+                            "checkpoint_name": "summarize",
+                            "timestamp": "now",
+                            "trips": "trip_mode_choice",
+                        },
+                    ]
+                ).to_parquet(pipeline / "checkpoints.parquet")
+
+            summary = component_summary(output)
+            self.assertEqual(summary["pipeline_stores"], 2)
+            self.assertNotIn("mp_seed", summary["components"])
+            self.assertNotIn("summarize", summary["components"])
+            trips = summary["components"]["trip_mode_choice"]["tables"]["trips"]
+            self.assertEqual(trips["rows"], 5)
+            self.assertEqual(trips["partitions"], 2)
+            modes = trips["outcomes"]["trip_mode"]
+            self.assertEqual(modes["counts"], {"BIKE": 1, "SOV": 2, "WALK": 2})
+            self.assertEqual(
+                modes["segments"]["primary_purpose"]["work"]["counts"],
+                {"SOV": 2, "WALK": 1},
+            )
+
+    def test_component_summary_profile_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            pipeline = output / "pipeline.parquetpipeline"
+            (pipeline / "choosers").mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "segment": ["a", "b", "b"],
+                    "result": [1, 2, 3],
+                    "modeled": [True, True, False],
+                }
+            ).to_parquet(pipeline / "choosers/custom_step.parquet")
+            pd.DataFrame(
+                [
+                    {
+                        "checkpoint_name": "custom_step",
+                        "timestamp": "now",
+                        "choosers": "custom_step",
+                    }
+                ]
+            ).to_parquet(pipeline / "checkpoints.parquet")
+            profile = {
+                "component_summaries": {
+                    "custom_*": {
+                        "table": "choosers",
+                        "outcomes": ["result"],
+                        "segments": ["segment"],
+                        "filters": {"modeled": True},
+                    }
+                }
+            }
+            outcome = component_summary(output, profile)["components"]["custom_step"]
+            result = outcome["tables"]["choosers"]["outcomes"]["result"]
+            self.assertEqual(result["counts"], {"1": 1, "2": 1})
+            self.assertEqual(result["segments"]["segment"]["a"]["counts"], {"1": 1})
 
     def test_real_numba_disk_hit_allowed_and_miss_blocked(self):
         """A fresh interpreter must load warmed overloads but reject new ones."""

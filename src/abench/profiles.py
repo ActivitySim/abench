@@ -25,6 +25,8 @@ FIELDS = {
     "output_tables",
     "output_prefix",
     "zone_label",
+    "component_summaries",
+    "component_summary_category_limit",
     "sources",
     "requirements",
     "constraints",
@@ -89,6 +91,46 @@ def load_profile(value, root):
             not isinstance(opts, dict) for opts in tables.values()
         ):
             raise ValueError(f"{key} must map table names to summary options")
+    summaries = profile.get("component_summaries", {})
+    if not isinstance(summaries, dict):
+        raise ValueError("component_summaries must be a mapping")
+    for pattern, options in summaries.items():
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError("component_summaries keys must be model name patterns")
+        if options is False:
+            continue
+        if not isinstance(options, dict) or not isinstance(options.get("table"), str):
+            raise ValueError("component_summaries entries need a table")
+        outcomes = options.get("outcomes")
+        if (
+            not isinstance(outcomes, list)
+            or not outcomes
+            or any(not isinstance(value, str) for value in outcomes)
+        ):
+            raise ValueError(
+                "component_summaries outcomes must be a nonempty list of strings"
+            )
+        segments = options.get("segments", [])
+        if not isinstance(segments, list) or any(
+            not isinstance(value, str) for value in segments
+        ):
+            raise ValueError("component_summaries segments must be a list of strings")
+        filters = options.get("filters", {})
+        if not isinstance(filters, dict) or any(
+            not isinstance(column, str)
+            or isinstance(accepted, dict)
+            or (
+                isinstance(accepted, list)
+                and any(isinstance(value, (dict, list)) for value in accepted)
+            )
+            for column, accepted in filters.items()
+        ):
+            raise ValueError(
+                "component_summaries filters must map columns to values or value lists"
+            )
+    limit = profile.get("component_summary_category_limit", 100)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError("component_summary_category_limit must be a positive integer")
     return profile
 
 

@@ -85,6 +85,29 @@ def test_profiles_preflight_and_oversampling(tmp_path):
     assert extended["models_from"] == "ext-configs/settings.yaml"
 
 
+def test_component_summary_profile_contract(tmp_path):
+    profile = make_model(tmp_path)
+    profile["component_summaries"] = {
+        "custom_*": {
+            "table": "trips",
+            "outcomes": ["mode"],
+            "segments": ["purpose"],
+            "filters": {"modeled": True},
+        },
+        "diagnostic_*": False,
+    }
+    profile["component_summary_category_limit"] = 25
+    path = tmp_path / "benchmark.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    loaded = load_profile("benchmark.yaml", tmp_path)
+    assert loaded["component_summary_category_limit"] == 25
+
+    profile["component_summaries"]["custom_*"]["outcomes"] = "mode"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(ValueError, match="outcomes"):
+        load_profile("benchmark.yaml", tmp_path)
+
+
 def test_config_overlay_and_process_precedence(tmp_path):
     profile = make_model(tmp_path)
     overlay = tmp_path / "overlay-0"

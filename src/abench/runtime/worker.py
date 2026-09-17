@@ -245,6 +245,8 @@ if __name__ == "__main__":
     if mode == "model":
         run_model(spec, phase)
     elif mode == "summary":
+        from component_summary import component_summary
+
         write_json(
             phase / "input-summary.json",
             table_summary(Path("/data"), tables=spec["profile"].get("input_tables")),
@@ -256,6 +258,10 @@ if __name__ == "__main__":
                 spec["profile"].get("output_prefix", "final_"),
                 spec["profile"].get("output_tables"),
             ),
+        )
+        write_json(
+            phase / "component-summary.json",
+            component_summary(phase / "output", spec["profile"]),
         )
     else:
         sys.exit(supervise(spec, phase))
