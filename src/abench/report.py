@@ -242,6 +242,196 @@ def runtime_chart(runs, components):
     return f'<svg viewBox="0 0 900 {y + 20}" role="img" aria-label="Component runtime mean and standard deviation"><text x="310" y="18">0 seconds</text><text x="790" y="18">{maximum:.1f} s</text>{"".join(rows)}</svg>'
 
 
+def outcome_keys(runs):
+    """Preserve first-appearance order across runs, mirroring component ordering."""
+    keys = []
+    for run in runs:
+        for component, cdata in run["component_summaries"].get("components", {}).items():
+            for table, tdata in cdata.get("tables", {}).items():
+                for outcome in tdata.get("outcomes", {}):
+                    key = (component, table, outcome)
+                    if key not in keys:
+                        keys.append(key)
+    return keys
+
+
+def outcome_data(run, key):
+    component, table, outcome = key
+    tables = (
+        run["component_summaries"].get("components", {}).get(component, {}).get("tables", {})
+    )
+    return tables.get(table, {}).get("outcomes", {}).get(outcome)
+
+
+def outcome_categories(runs, key):
+    """Union category labels across runs; nulls sort last for readability."""
+    categories = []
+    for run in runs:
+        for category in (outcome_data(run, key) or {}).get("counts", {}):
+            if category not in categories:
+                categories.append(category)
+    return sorted(categories, key=lambda c: (c == "<null>", c))
+
+
+def outcome_totals(runs, key):
+    return [sum((outcome_data(run, key) or {}).get("counts", {}).values()) for run in runs]
+
+
+def outcome_table(runs, key, categories):
+    headers = "".join(f"<th>{escape(run['spec']['label'])}</th>" for run in runs)
+    totals = outcome_totals(runs, key)
+    rows = []
+    for category in categories:
+        cells = []
+        for run, total in zip(runs, totals):
+            count = (outcome_data(run, key) or {}).get("counts", {}).get(category)
+            if count is None:
+                cells.append("<td>—</td>")
+            else:
+                share = f"{count / total * 100:.1f}%" if total else "—"
+                cells.append(f"<td>{count:,}<br><small>{share}</small></td>")
+        rows.append(f"<tr><th>{escape(category)}</th>{''.join(cells)}</tr>")
+    omitted = [
+        run["spec"]["label"]
+        for run in runs
+        if "counts_omitted" in (outcome_data(run, key) or {})
+    ]
+    note = (
+        f"<p><small>Exact category counts omitted (category limit exceeded) for: "
+        f"{escape(', '.join(omitted))}.</small></p>"
+        if omitted
+        else ""
+    )
+    return f"<table><tr><th>Value</th>{headers}</tr>{''.join(rows)}</table>{note}"
+
+
+def outcome_chart(runs, key, categories):
+    """Grouped horizontal bars compare each category's share of non-null observations."""
+    totals = outcome_totals(runs, key)
+    rows = []
+    y = 30
+    for category in categories:
+        rows.append(f'<text x="5" y="{y + 12}">{escape(category)}</text>')
+        for i, (run, total) in enumerate(zip(runs, totals)):
+            count = (outcome_data(run, key) or {}).get("counts", {}).get(category)
+            if count and total:
+                share = count / total * 100
+                width = share * 5.3
+                rows.append(
+                    f'<rect x="310" y="{y}" width="{width:.2f}" height="12" fill="{COLORS[i % len(COLORS)]}">'
+                    f'<title>{escape(run["spec"]["label"])}: {count:,} ({share:.1f}%)</title></rect>'
+                )
+            y += 17
+        y += 10
+    return (
+        f'<svg viewBox="0 0 900 {y + 20}" role="img" aria-label="Outcome category share">'
+        f'<text x="310" y="18">0%</text><text x="790" y="18">100%</text>{"".join(rows)}</svg>'
+    )
+
+
+def numeric_table(runs, key):
+    headers = "".join(f"<th>{escape(run['spec']['label'])}</th>" for run in runs)
+    rows = []
+    for label, stat in (("Mean", "mean"), ("Minimum", "min"), ("Maximum", "max")):
+        cells = []
+        for run in runs:
+            numeric = (outcome_data(run, key) or {}).get("numeric")
+            cells.append(f"<td>{numeric[stat]:.3f}</td>" if numeric else "<td>—</td>")
+        rows.append(f"<tr><th>{label}</th>{''.join(cells)}</tr>")
+    return f"<table><tr><th>Statistic</th>{headers}</tr>{''.join(rows)}</table>"
+
+
+def numeric_chart(runs, key):
+    """Grouped bars compare the mean with a min/max whisker on a shared scale."""
+    values = [(outcome_data(run, key) or {}).get("numeric") for run in runs]
+    present = [v for v in values if v]
+    minimum = min((v["min"] for v in present), default=0)
+    maximum = max((v["max"] for v in present), default=1)
+    span = (maximum - minimum) or 1
+    rows = []
+    y = 30
+    for i, (run, value) in enumerate(zip(runs, values)):
+        if value:
+            scale = 530 / span
+            mean_x = 310 + (value["mean"] - minimum) * scale
+            lo_x = 310 + (value["min"] - minimum) * scale
+            hi_x = 310 + (value["max"] - minimum) * scale
+            rows.append(
+                f'<rect x="{mean_x - 2:.2f}" y="{y}" width="4" height="12" fill="{COLORS[i % len(COLORS)]}">'
+                f'<title>{escape(run["spec"]["label"])}: mean {value["mean"]:.3f}, '
+                f'range [{value["min"]:.3f}, {value["max"]:.3f}]</title></rect>'
+                f'<path d="M {lo_x:.2f} {y + 6} H {hi_x:.2f}" stroke="#222"/>'
+            )
+        y += 17
+    return (
+        f'<svg viewBox="0 0 900 {y + 20}" role="img" aria-label="Outcome numeric range">'
+        f'<text x="310" y="18">{minimum:.2f}</text><text x="790" y="18">{maximum:.2f}</text>'
+        f'{"".join(rows)}</svg>'
+    )
+
+
+def summary_table(runs, key):
+    """High-cardinality, non-numeric outcomes (e.g. free-form ids) get counts only."""
+    headers = "".join(f"<th>{escape(run['spec']['label'])}</th>" for run in runs)
+    rows = []
+    for label, stat in (
+        ("Non-null count", "count"),
+        ("Nulls", "nulls"),
+        ("Distinct values", "distinct"),
+    ):
+        cells = []
+        for run in runs:
+            data = outcome_data(run, key)
+            cells.append(f"<td>{data[stat]:,}</td>" if data and stat in data else "<td>—</td>")
+        rows.append(f"<tr><th>{label}</th>{''.join(cells)}</tr>")
+    return f"<table><tr><th>Statistic</th>{headers}</tr>{''.join(rows)}</table>"
+
+
+def outcomes_section(runs):
+    """Compare per-model outcome distributions across runs, switching table/plot."""
+    keys = outcome_keys(runs)
+    if not keys:
+        return ""
+    options = []
+    panels = []
+    for index, key in enumerate(keys):
+        component, table, outcome = key
+        anchor = f"outcome-{index}"
+        options.append(
+            f'<option value="{anchor}">{escape(f"{component} · {table} · {outcome}")}</option>'
+        )
+        categories = outcome_categories(runs, key)
+        if categories:
+            body = (
+                f'<div class="table-view">{outcome_table(runs, key, categories)}</div>'
+                f'<div class="plot-view">{outcome_chart(runs, key, categories)}</div>'
+            )
+        elif any((outcome_data(run, key) or {}).get("numeric") for run in runs):
+            body = (
+                f'<div class="table-view">{numeric_table(runs, key)}</div>'
+                f'<div class="plot-view">{numeric_chart(runs, key)}</div>'
+            )
+        else:
+            body = summary_table(runs, key)
+        style = "" if index == 0 else "display:none"
+        panels.append(f'<div class="outcome-panel" id="{anchor}" style="{style}">{body}</div>')
+    return (
+        "<h2>Component outcomes</h2>"
+        "<p>Model choice distributions recovered from ActivitySim checkpoints, merged across "
+        "worker partitions. Shares are of non-null observations within each run; household "
+        "samples can differ across experiments, so compare shares rather than raw counts. "
+        "Outcomes too high-cardinality for exact category counts show mean with a min/max "
+        "range instead.</p>"
+        '<label for="outcome-select"><b>Outcome:</b></label> '
+        f'<select id="outcome-select">{"".join(options)}</select> '
+        '<span class="outcome-toggle">'
+        '<button type="button" data-view="table" class="active">Table</button>'
+        '<button type="button" data-view="plot">Plot</button>'
+        "</span>"
+        f'<div id="outcomes-section" class="scroll">{"".join(panels)}</div>'
+    )
+
+
 def experiment_card(run, xmax, ymax):
     """Present the primary settings and counts before detailed provenance."""
     spec = run["spec"]
@@ -426,15 +616,38 @@ selector.addEventListener('change', highlightComponent);
 highlightComponent();
 </script>
 """
+    outcomes_html = outcomes_section(runs)
+    # Outcome labels live only in escaped HTML attributes/text, never in JS.
+    outcomes_script = """
+<script>
+const outcomeSelect = document.getElementById('outcome-select');
+const outcomesSection = document.getElementById('outcomes-section');
+if (outcomeSelect) {
+  outcomeSelect.addEventListener('change', () => {
+    document.querySelectorAll('.outcome-panel').forEach(panel => {
+      panel.style.display = panel.id === outcomeSelect.value ? '' : 'none';
+    });
+  });
+  document.querySelectorAll('.outcome-toggle button').forEach(button => {
+    button.addEventListener('click', () => {
+      outcomesSection.classList.toggle('plot-mode', button.dataset.view === 'plot');
+      document.querySelectorAll('.outcome-toggle button').forEach(b => {
+        b.classList.toggle('active', b === button);
+      });
+    });
+  });
+}
+</script>
+""" if outcomes_html else ""
     document = f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>abench report</title>
-<style>body{{font:15px system-ui;margin:2rem;color:#17212b}}.cards{{display:flex;gap:24px;overflow-x:auto}}article{{flex:1;min-width:420px;border:1px solid #ccc;padding:16px}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}}svg{{width:100%;min-width:420px}}table{{border-collapse:collapse;width:100%}}th,td{{padding:10px;text-align:left;border-bottom:1px solid #ddd}}.fastest{{background:#d7f3dc}}small{{color:#58616a}}.runtime{{max-width:1200px}}.scroll{{overflow-x:auto}}</style>
+<style>body{{font:15px system-ui;margin:2rem;color:#17212b}}.cards{{display:flex;gap:24px;overflow-x:auto}}article{{flex:1;min-width:420px;border:1px solid #ccc;padding:16px}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}}svg{{width:100%;min-width:420px}}table{{border-collapse:collapse;width:100%}}th,td{{padding:10px;text-align:left;border-bottom:1px solid #ddd}}.fastest{{background:#d7f3dc}}small{{color:#58616a}}.runtime{{max-width:1200px}}.scroll{{overflow-x:auto}}.outcome-toggle button{{margin-left:4px;border:1px solid #ccc;background:#f4f6f8;padding:4px 10px;border-radius:4px;cursor:pointer}}.outcome-toggle button.active{{background:#0072b2;color:#fff;border-color:#0072b2}}.plot-view{{display:none}}#outcomes-section.plot-mode .table-view{{display:none}}#outcomes-section.plot-mode .plot-view{{display:block}}</style>
 <h1>abench report</h1><p>Whole-container cgroup v2 memory counts shared pages once, including file cache, kernel memory and the supervisor. Swap is recorded separately in memory.csv. Cache preparation and post-run summaries are excluded. Peak is the kernel high-water mark sampled during the model lifetime, including container startup. Memory panels use identical axes.</p>
 {comparison_notes(runs)}
 <label for="memory-component"><b>Highlight component:</b></label>
 <select id="memory-component"><option value="">None</option>{options}</select>
 <p>Selection applies to every memory chart. Each translucent band is one worker execution; darker overlaps indicate concurrent workers. Gaps remain unshaded. Hover over a band for its worker and time range.</p>
 <noscript>Enable JavaScript to select and highlight component windows.</noscript>
-<div class="cards">{"".join(cards)}</div><h2>Component runtimes</h2><p>Mean ± population standard deviation across worker executions, with observation count and maximum. These describe worker imbalance, not uncertainty across repeated experiments. Component timings exclude pipeline checkpoint writes; elapsed time includes startup, I/O and coordination. Parallel component times must not be summed to estimate wall time. Green cells mark the fastest successful experiment's mean; failed runs are excluded from winners.</p><div class="scroll"><table><tr><th>Component</th>{headers}</tr>{"".join(table)}</table></div><h2>Runtime comparison</h2><p>{legend}</p><div class="runtime">{runtime_chart(runs, components)}</div>{selector_script}</html>"""
+<div class="cards">{"".join(cards)}</div><h2>Component runtimes</h2><p>Mean ± population standard deviation across worker executions, with observation count and maximum. These describe worker imbalance, not uncertainty across repeated experiments. Component timings exclude pipeline checkpoint writes; elapsed time includes startup, I/O and coordination. Parallel component times must not be summed to estimate wall time. Green cells mark the fastest successful experiment's mean; failed runs are excluded from winners.</p><div class="scroll"><table><tr><th>Component</th>{headers}</tr>{"".join(table)}</table></div><h2>Runtime comparison</h2><p>{legend}</p><div class="runtime">{runtime_chart(runs, components)}</div>{outcomes_html}{selector_script}{outcomes_script}</html>"""
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(document)
     write_json(destination.with_suffix(".json"), runs)
