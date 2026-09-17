@@ -135,6 +135,25 @@ def test_config_overlay_and_process_precedence(tmp_path):
     assert "chunk_size: 100" in (tmp_path / "configs/settings.yaml").read_text()
 
 
+def test_explicit_error_terms_biases_location_choice_logsums(tmp_path):
+    profile = make_model(tmp_path)
+    phase = tmp_path / "measured"
+    phase.mkdir()
+    (phase / "output").mkdir()
+    spec = dict(
+        profile=profile,
+        households=2,
+        multiprocess=False,
+        processes=1,
+        sharrow=False,
+        use_explicit_error_terms=True,
+        config_overlay=[],
+    )
+    state = make_state(spec, phase, tmp_path, tmp_path / "data", tmp_path)
+    assert state.settings.use_explicit_error_terms is True
+    assert state.settings.bias_location_choice_logsums_for_poisson_sampling is True
+
+
 def test_validate_does_not_build_or_write(tmp_path, monkeypatch, capsys):
     make_model(tmp_path)
     calls = []

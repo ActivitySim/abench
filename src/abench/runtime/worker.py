@@ -65,20 +65,26 @@ def make_state(
     if spec["multiprocess"]:
         configs += [model_root / name for name in profile.get("mp_configs", [])]
     configs += [model_root / name for name in profile["configs"]]
+    overrides = dict(
+        households_sample_size=spec["households"],
+        multiprocess=spec["multiprocess"],
+        num_processes=spec["processes"],
+        sharrow="require" if spec["sharrow"] else False,
+        use_explicit_error_terms=spec["use_explicit_error_terms"],
+        fail_fast=True,
+    )
+    # TODO: remove this once sampling has been fixed for icdf/ee methods
+    if spec["use_explicit_error_terms"]:
+        # ActivitySim currently requires this bias correction whenever explicit error terms
+        # is used to make location choice logsums comparable to biased icdf sampling.
+        overrides["bias_location_choice_logsums_for_poisson_sampling"] = True
     state = State.make_default(
         working_dir=model_root,
         configs_dir=configs,
         data_dir=data_root,
         output_dir=phase / "output",
         cache_dir=results_root / "cache/model",
-        settings=dict(
-            households_sample_size=spec["households"],
-            multiprocess=spec["multiprocess"],
-            num_processes=spec["processes"],
-            sharrow="require" if spec["sharrow"] else False,
-            use_explicit_error_terms=spec["use_explicit_error_terms"],
-            fail_fast=True,
-        ),
+        settings=overrides,
     )
     # Every sliced phase honors the requested count, including phases that have
     # their own worker count in production configs or explicit chunk overlays.
