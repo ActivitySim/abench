@@ -1,7 +1,9 @@
 """Named suites reuse CLI validation/execution without requiring Docker in tests."""
 
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -61,6 +63,59 @@ def test_defaults_variables_and_source_overrides(tmp_path, monkeypatch):
     assert f"activitysim=ActivitySim/activitysim@{OTHER}" in second["argv"]
     assert f"activitysim=ActivitySim/activitysim@{SHA}" not in second["argv"]
     assert not Path(plan["output_root"]).exists()
+
+
+def test_suite_pins_moving_refs_before_execution(tmp_path, monkeypatch):
+    calls = []
+
+    def git(argv, **kwargs):
+        calls.append(argv[-1])
+        sha = SHA if argv[-1] == "refs/heads/main" else OTHER
+        return SimpleNamespace(stdout=f"{sha}\t{argv[-1]}\n")
+
+    monkeypatch.setattr(subprocess, "run", git)
+    path = suite(tmp_path)
+    document = yaml.safe_load(path.read_text())
+    document["vars"]["pr"] = 1110
+    document["defaults"]["sources"][1] = dict(
+        name="activitysim", repository="ActivitySim/activitysim", branch="main"
+    )
+    document["runs"] = {
+        "main": {},
+        "main_again": {},
+        "pr": {
+            "sources": [
+                dict(
+                    name="activitysim", repository="ActivitySim/activitysim", pr="${pr}"
+                )
+            ]
+        },
+    }
+    path.write_text(yaml.safe_dump(document))
+    executed = []
+    monkeypatch.setattr(experiments, "report", lambda *a: None)
+
+    def invoke(argv):
+        assert calls == ["refs/heads/main", "refs/pull/1110/head"]
+        executed.append(argv)
+        return 0
+
+    assert run_suite(path, invoke) == 0
+    root = next(tmp_path.glob("results-*"))
+    recorded = json.loads((root / "suite.json").read_text())
+    assert recorded["source_resolutions"] == [
+        dict(repository="ActivitySim/activitysim", ref="refs/heads/main", commit=SHA),
+        dict(
+            repository="ActivitySim/activitysim",
+            ref="refs/pull/1110/head",
+            commit=OTHER,
+        ),
+    ]
+    assert "branch: main" in recorded["original_yaml"]
+    for run, sha in zip(recorded["runs"], [SHA, SHA, OTHER]):
+        assert f"activitysim=ActivitySim/activitysim@{sha}" in run["argv"]
+        assert f"sharrow=ActivitySim/sharrow@{SHA}" in run["argv"]
+    assert [args[0] for args in executed] == ["validate"] * 3 + ["run"] * 3
 
 
 @pytest.mark.parametrize(
@@ -157,15 +212,109 @@ def test_cli_file_dispatch_and_validation(tmp_path, monkeypatch):
     monkeypatch.setattr(
         experiments,
         "run_suite",
-        lambda path, invoke, validate_only: calls.append((path, validate_only)) or 0,
+        lambda path, invoke, **kwargs: calls.append((path, kwargs)) or 0,
     )
     path = tmp_path / "named.yaml"
     assert cli.main([str(path)]) == 0
     assert cli.main(["run", str(path)]) == 0
     assert cli.main(["validate", str(path)]) == 0
-    assert calls == [(path, False), (path, False), (path, True)]
+    assert cli.main([str(path), "--set", "activitysim_pr=1110"]) == 0
+    assert cli.main(["validate", str(path), "--set=activitysim_pr=1110"]) == 0
+    assert cli.main(["prepare", str(path), "--set", "activitysim_pr=1110"]) == 0
+    assert calls == [
+        (path, dict(validate_only=False, prepare_only=False, assignments=[])),
+        (path, dict(validate_only=False, prepare_only=False, assignments=[])),
+        (path, dict(validate_only=True, prepare_only=False, assignments=[])),
+        (
+            path,
+            dict(
+                validate_only=False,
+                prepare_only=False,
+                assignments=["activitysim_pr=1110"],
+            ),
+        ),
+        (
+            path,
+            dict(
+                validate_only=True,
+                prepare_only=False,
+                assignments=["activitysim_pr=1110"],
+            ),
+        ),
+        (
+            path,
+            dict(
+                validate_only=False,
+                prepare_only=True,
+                assignments=["activitysim_pr=1110"],
+            ),
+        ),
+    ]
     with pytest.raises(SystemExit):
         cli.main([str(path), "--households", "5"])
+
+
+def test_pr_override_updates_labels_and_pins_and_main_is_fresh(tmp_path, monkeypatch):
+    path = suite(tmp_path)
+    document = yaml.safe_load(path.read_text())
+    document["inputs"] = {
+        "activitysim_pr": {"type": "integer", "default": 100, "minimum": 1}
+    }
+    document["runs"] = {
+        "main": {
+            "sources": [
+                dict(
+                    name="activitysim",
+                    repository="ActivitySim/activitysim",
+                    branch="main",
+                )
+            ]
+        },
+        "pr": {
+            "label": "PR ${activitysim_pr}",
+            "sources": [
+                dict(
+                    name="activitysim",
+                    repository="ActivitySim/activitysim",
+                    pr="${activitysim_pr}",
+                )
+            ],
+        },
+    }
+    path.write_text(yaml.safe_dump(document))
+    calls = []
+    main_sha = SHA
+
+    def git(argv, **kwargs):
+        calls.append(argv[-1])
+        sha = main_sha if argv[-1] == "refs/heads/main" else OTHER
+        return SimpleNamespace(stdout=f"{sha}\t{argv[-1]}\n")
+
+    monkeypatch.setattr(subprocess, "run", git)
+    first = load_suite(path, assignments=["activitysim_pr=1110"])
+    assert first["cli_overrides"] == {"activitysim_pr": 1110}
+    assert first["input_values"]["activitysim_pr"] == 1110
+    assert (
+        yaml.safe_load(first["original_yaml"])["inputs"]["activitysim_pr"]["default"]
+        == 100
+    )
+    assert "PR 1110" in first["runs"][1]["argv"]
+    assert f"activitysim=ActivitySim/activitysim@{SHA}" in first["runs"][0]["argv"]
+    assert f"activitysim=ActivitySim/activitysim@{OTHER}" in first["runs"][1]["argv"]
+    main_sha = "c" * 40
+    second = load_suite(path, assignments=["activitysim_pr=1110"])
+    assert (
+        f"activitysim=ActivitySim/activitysim@{main_sha}" in second["runs"][0]["argv"]
+    )
+    assert calls == ["refs/heads/main", "refs/pull/1110/head"] * 2
+    assert (
+        yaml.safe_load(path.read_text())["inputs"]["activitysim_pr"]["default"] == 100
+    )
+
+
+def test_pr_override_requires_declared_variable(tmp_path):
+    with pytest.raises(ValueError, match="unknown input"):
+        load_suite(suite(tmp_path), assignments=["activitysim_pr=1110"])
 
 
 def test_shipped_sandag_suite():

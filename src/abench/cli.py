@@ -60,7 +60,7 @@ def positive(value):
 def parser():
     p = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Named experiments: abench experiments.yaml; preflight: abench validate experiments.yaml",
+        epilog="Named experiments: abench experiments.yaml [--set NAME=VALUE]; preflight: abench validate experiments.yaml [--set NAME=VALUE]; data only: abench prepare experiments.yaml",
     )
     p.add_argument("--version", action="version", version=f"abench {__version__}")
     p.add_argument("--model-dir", type=Path, default=Path.cwd())
@@ -228,19 +228,39 @@ def main(argv=None):
     p = parser()
     argv = list(sys.argv[1:] if argv is None else argv)
     # A file invocation stays separate from model profiles and ordinary flags.
-    candidate = argv[1:] if argv and argv[0] in ("run", "validate") else argv
+    candidate = argv[1:] if argv and argv[0] in ("run", "validate", "prepare") else argv
     if (
         candidate
         and not candidate[0].startswith("-")
-        and candidate[0] not in ("run", "report", "validate")
+        and candidate[0] not in ("run", "report", "validate", "prepare")
     ):
-        if len(candidate) != 1:
-            p.error(
-                "an experiment file cannot be mixed with command-line overrides; edit its defaults or runs"
-            )
-        from .experiments import run_suite
+        from .experiments import read_suite, run_suite
+        from .inputs import input_help
 
-        return run_suite(Path(candidate[0]), main, validate_only=argv[0] == "validate")
+        suite_parser = argparse.ArgumentParser(
+            prog="abench",
+            description="Run a named experiment suite.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=input_help(read_suite(Path(candidate[0]))[1])
+            if any(flag in candidate[1:] for flag in ("--help", "-h"))
+            else None,
+        )
+        suite_parser.add_argument("experiment_file", type=Path)
+        suite_parser.add_argument(
+            "--set",
+            action="append",
+            default=[],
+            metavar="NAME=VALUE",
+            help="override a declared experiment input (repeatable)",
+        )
+        suite_args = suite_parser.parse_args(candidate)
+        return run_suite(
+            suite_args.experiment_file,
+            main,
+            prepare_only=argv[0] == "prepare",
+            validate_only=argv[0] == "validate",
+            assignments=suite_args.set,
+        )
     action = argv.pop(0) if argv and argv[0] in ("run", "report", "validate") else "run"
     args = p.parse_args(argv)
     if action == "report":

@@ -1,12 +1,88 @@
 """Normalize exact GitHub source overrides before executing any build commands."""
 
 import re
+import subprocess
 from pathlib import PurePosixPath
 
 
 def canonical_name(name):
     """Compare distribution names using Python packaging's normalization rules."""
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def suite_source(value, resolutions):
+    """Pin a suite's GitHub branch or PR head once, before any builds begin.
+
+    Only named suites accept moving selectors. The CLI, model profiles, and
+    Docker builder continue to receive immutable commits. A shared memo prevents
+    a branch update between runs from changing an inherited dependency.
+    """
+    if not isinstance(value, dict) or not ({"branch", "pr"} & value.keys()):
+        return source(value)
+    if sum(key in value for key in ("commit", "branch", "pr")) != 1:
+        raise ValueError("source requires exactly one of commit, branch, or pr")
+    selector = "branch" if "branch" in value else "pr"
+    requested = value[selector]
+    if selector == "pr":
+        if type(requested) is not int or requested <= 0:
+            raise ValueError("source pr must be a positive integer")
+        ref = f"refs/pull/{requested}/head"
+    else:
+        if (
+            not isinstance(requested, str)
+            or not requested
+            or any(c.isspace() or c in "~^:?*[\\" for c in requested)
+            or any(ord(c) < 32 or ord(c) == 127 for c in requested)
+            or ".." in requested
+            or "@{" in requested
+            or requested.endswith(".")
+            or any(
+                not p or p.startswith(".") or p.endswith(".lock")
+                for p in requested.split("/")
+            )
+        ):
+            raise ValueError("invalid source branch")
+        ref = f"refs/heads/{requested}"
+    # Reuse exact-source validation before allowing any repository into Git.
+    pin = source(
+        {k: v for k, v in value.items() if k != selector} | {"commit": "0" * 40}
+    )
+    repository = pin["repository"]
+    key = (repository.lower(), ref)
+    if key not in resolutions:
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "ls-remote",
+                    "--exit-code",
+                    f"https://github.com/{repository}.git",
+                    ref,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ValueError(
+                f"Cannot resolve {repository} {ref}: {error}. "
+                "Check Git/network access and the branch or PR number, or use commit: <full-SHA>."
+            ) from error
+        matches = [line.split() for line in result.stdout.splitlines()]
+        commits = [parts[0] for parts in matches if len(parts) == 2 and parts[1] == ref]
+        if len(commits) != 1 or not re.fullmatch(r"[0-9a-fA-F]{40}", commits[0]):
+            raise ValueError(
+                f"GitHub did not return an exact commit for {repository} {ref}"
+            )
+        resolutions[key] = {
+            "repository": repository,
+            "ref": ref,
+            "commit": commits[0].lower(),
+        }
+        print(f"Resolved {repository} {ref} → {commits[0].lower()}", flush=True)
+    pin["commit"] = resolutions[key]["commit"]
+    return pin
 
 
 def source(value):
