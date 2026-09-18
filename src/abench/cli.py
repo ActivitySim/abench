@@ -234,18 +234,26 @@ def main(argv=None):
         and not candidate[0].startswith("-")
         and candidate[0] not in ("run", "report", "validate", "prepare")
     ):
+        from .discovery import directory_help, select_experiment
         from .experiments import read_suite, run_suite
         from .inputs import input_help
 
+        target = Path(candidate[0]).expanduser()
         suite_parser = argparse.ArgumentParser(
             prog="abench",
-            description="Run a named experiment suite.",
+            description="Run an experiment YAML file or choose from a directory’s .abench folder.",
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            epilog=input_help(read_suite(Path(candidate[0]))[1])
+            epilog=(
+                directory_help(target)
+                if target.is_dir()
+                else input_help(read_suite(target)[1])
+            )
             if any(flag in candidate[1:] for flag in ("--help", "-h"))
             else None,
         )
-        suite_parser.add_argument("experiment_file", type=Path)
+        suite_parser.add_argument(
+            "experiment_file", type=Path, help="experiment YAML file or model directory"
+        )
         suite_parser.add_argument(
             "--set",
             action="append",
@@ -259,13 +267,15 @@ def main(argv=None):
             help="use defaults and --set values without prompting (required inputs must be supplied)",
         )
         suite_args = suite_parser.parse_args(candidate)
+        interactive = not suite_args.non_interactive and sys.stdin.isatty()
+        selected = select_experiment(suite_args.experiment_file, interactive)
         return run_suite(
-            suite_args.experiment_file,
+            selected,
             main,
             prepare_only=argv[0] == "prepare",
             validate_only=argv[0] == "validate",
             assignments=suite_args.set,
-            interactive=not suite_args.non_interactive and sys.stdin.isatty(),
+            interactive=interactive,
         )
     action = argv.pop(0) if argv and argv[0] in ("run", "report", "validate") else "run"
     args = p.parse_args(argv)

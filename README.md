@@ -41,6 +41,31 @@ promised to work. Build/runtime failures retain diagnostics and a failure report
 
 ## Named experiment files
 
+You can pass a model directory instead of a YAML file:
+
+```bash
+abench /path/to/model
+```
+
+Abench looks for `.yaml` and `.yml` files directly inside `/path/to/model/.abench/`
+(no recursive search). In a terminal it lists them alphabetically and asks which
+experiment to run, then prompts for that experiment's inputs. Enter chooses the
+first file; a single file still gets a selection prompt. Only the selected file
+is loaded. `run`, `validate`, and `prepare` all support directory selection.
+
+`abench /path/to/model --help` lists available files without prompting or running
+anything. Missing `.abench` directories and empty file lists produce clear errors.
+Without a terminal, or with `--non-interactive`, one file is selected automatically;
+multiple files require passing the desired YAML path directly.
+
+Relative paths remain relative to the selected YAML file. For a file inside
+`.abench`, use `model_dir: ..` and, for example, `data_dir: ../data_full` and
+`output_root: ../benchmark-runs/run-${timestamp}` to reference the parent model.
+For declared downloads, keep unpack destinations inside `.abench` (for example,
+`unpack: data_full` with `data_dir: data_full`); asset destinations cannot use `..`.
+Moving an existing suite into `.abench` requires reviewing its paths.
+
+
 Write common options once and override only what differs between runs:
 
 ```yaml
