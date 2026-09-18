@@ -67,15 +67,18 @@ def test_model_container_error_is_wrapped_with_root_cause(tmp_path, monkeypatch)
         import subprocess
 
         phase = output / phase_name
-        phase.mkdir()
+        phase.mkdir(parents=True)
         (phase / "cache-miss-1.txt").write_text(
             "/results/cache/flows/flow_ABC/__init__.py\n"
+        )
+        (phase / "console.log").write_text(
+            "ValueError: ordinary model error after compilation\n"
         )
         raise subprocess.CalledProcessError(1, ["docker", "run", "test-image"])
 
     monkeypatch.setattr(cli, "command", command)
     monkeypatch.setattr(cli, "container_phase", container)
-    with pytest.raises(BenchmarkFailure, match="flow_ABC") as error:
+    with pytest.raises(BenchmarkFailure, match="ordinary model error") as error:
         cli.main(
             [
                 "run",
@@ -92,7 +95,7 @@ def test_model_container_error_is_wrapped_with_root_cause(tmp_path, monkeypatch)
     assert (output / "report.html").is_file()
     failure = json.loads((output / "experiment.json").read_text())["failure"]
     assert failure["phase"] == "measured"
-    assert "Results rejected" in failure["error"]
+    assert "ordinary model error" in failure["error"]
 
 
 def test_successful_exit_with_wrong_sample_is_explained(tmp_path):

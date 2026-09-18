@@ -15,9 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from .attempts import measured_attempts
 from .common import read_json, write_json
 from .failures import BenchmarkFailure, describe_failure
-from .flow_cache import reuse_flows
+from .flow_cache import publish_flows, reuse_flows
 from .profiles import load_profile, validate_model
 from .report import load_run, report
 from .sources import resolve_sources
@@ -84,6 +85,12 @@ def parser():
         type=int,
         default=5000,
         help="maximum cache-build households (default: 5000); warmup is always single-process",
+    )
+    p.add_argument(
+        "--cache-retries",
+        type=int,
+        default=2,
+        help="additional attempts after completed runs compile flows (default: 2)",
     )
     p.add_argument("--data-dir", type=Path, default=None)
     p.add_argument(
@@ -162,13 +169,22 @@ def mount(source, target, readonly=False):
 def container_phase(spec, output, data, image, phase_name):
     """Retain Docker exit/OOM state even when the supervisor cannot finish."""
     phase = output / phase_name
-    phase.mkdir()
+    phase.mkdir(parents=True)
+    phase_kind = "warmup" if phase_name == "warmup" else "measured"
     name = "abench-" + uuid.uuid4().hex[:12]
+    # Each container reads an immutable, uniquely named settings snapshot. Reusing
+    # the mutable root manifest across Docker Desktop mounts can expose stale data.
+    snapshot_name = f"spec-{name}.json"
+    write_json(phase / snapshot_name, spec)
     args = [
         "docker",
         "run",
         "--name",
         name,
+        "--env",
+        f"BENCH_SPEC_PATH=/results/{phase_name}/{snapshot_name}",
+        "--env",
+        f"BENCH_PHASE_NAME={phase_kind}",
         "--cgroupns=private",
         "--memory",
         spec["memory"],
@@ -262,6 +278,8 @@ def main(argv=None):
     )
     if args.sharrow and not args.sharrow_commit:
         p.error("Sharrow enabled: provide a sharrow source override")
+    if args.cache_retries < 0:
+        p.error("--cache-retries must be nonnegative")
     if args.warmup_households < 1:
         p.error("--warmup-households must be positive")
     if args.households < 0:
@@ -456,6 +474,8 @@ def main(argv=None):
             # Only flow artifacts are reused. A small serial warmup prepares flows;
             # measurement remains responsible for rejecting missing signatures.
             shutil.copytree(seed / "cache/flows", output / "cache/flows")
+        cache = nullcontext(None)
+        identity = None
         if args.sharrow:
             stage = "warmup"
             print(
@@ -487,24 +507,35 @@ def main(argv=None):
                     "Checking compatible flow cache (waiting for any active warmup)…",
                     flush=True,
                 )
-            with cache as cache_info:
+        with cache as cache_info:
+
+            def publish_cache():
                 if cache_info is not None:
-                    spec["flow_cache"] = cache_info
-                    write_json(output / "experiment.json", spec)
-                    print(
-                        f"Reused {cache_info['restored_files']} flow-cache files.",
-                        flush=True,
-                    )
+                    publish_flows(identity, output / "cache/flows", cache_info)
+
+            if cache_info is not None:
+                spec["flow_cache"] = cache_info
+                write_json(output / "experiment.json", spec)
+                print(
+                    f"Reused {cache_info['restored_files']} flow-cache files.",
+                    flush=True,
+                )
+            if args.sharrow:
                 container_phase(spec, output, data, image, "warmup")
+                publish_cache()
             write_json(output / "experiment.json", spec)
-        stage = "measured"
-        print("Running measured model…", flush=True)
-        container_phase(spec, output, data, image, "measured")
-        if not load_run(output)["valid"]:
-            raise BenchmarkFailure(describe_failure(output, "measured"))
+            stage = "measured"
+            measured_attempts(
+                spec,
+                output,
+                lambda phase_name: container_phase(
+                    spec, output, data, image, phase_name
+                ),
+                publish_cache,
+            )
     except (Exception, KeyboardInterrupt) as error:
         if isinstance(error, subprocess.CalledProcessError):
-            error = BenchmarkFailure(describe_failure(output, stage))
+            error = BenchmarkFailure(describe_failure(output, stage, ignore_cache=True))
             spec["failure"] = {"phase": stage, "error": str(error)}
             write_json(output / "experiment.json", spec)
             raise error from None

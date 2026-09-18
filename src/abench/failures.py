@@ -21,10 +21,13 @@ def tail(path, limit=131072):
         return stream.read().decode("utf-8", errors="replace")
 
 
-def describe_failure(output, phase):
+def describe_failure(output, phase, *, ignore_cache=False):
     """Prefer explicit cache/OOM evidence over a generic worker exit exception."""
     output = Path(output)
-    directory = output / phase
+    spec = read_json(output / "experiment.json", {})
+    directory = output / (
+        spec.get("measured_directory", "measured") if phase == "measured" else phase
+    )
     log = output / "build.log" if phase == "build" else directory / "console.log"
     docker = read_json(directory / "docker-state.json", {})
     components = set()
@@ -45,7 +48,25 @@ def describe_failure(output, phase):
             if line.strip()
         }
     )
-    if misses:
+    spec = read_json(output / "experiment.json", {})
+    retry_mode = "cache_retries" in spec
+    completed = (
+        docker.get("ExitCode") == 0
+        and read_json(directory / "status.json", {}).get("returncode") == 0
+    )
+    if (
+        misses
+        and not ignore_cache
+        and retry_mode
+        and completed
+        and not docker.get("OOMKilled")
+    ):
+        reason = "Completed attempt compiled Sharrow flows; its runtime and memory are excluded."
+        remedy = (
+            spec.get("failure", {}).get("error")
+            or "See attempt history and cache-miss-details-*.jsonl for required signatures."
+        )
+    elif misses and not ignore_cache and not retry_mode:
         reason = f"Sharrow flow cache miss{where}: " + ", ".join(
             Path(name).parent.name for name in misses
         )

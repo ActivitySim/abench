@@ -21,11 +21,22 @@ ACTIVITYSIM = "5c6fae24a91a57a2d6dfc2e1dbe062a61d94545a"
 SHARROW = "fc175b27d8e0c5d202721c67d96b050e6117b235"
 
 
-@pytest.mark.parametrize("multiprocess,sharrow", [(False, False), (True, True)])
-def test_tiny_model(tmp_path, multiprocess, sharrow):
+@pytest.mark.parametrize(
+    "multiprocess,sharrow,retry",
+    [(False, False, False), (True, True, False), (True, True, True)],
+)
+def test_tiny_model(tmp_path, multiprocess, sharrow, retry):
     """Build pinned sources, run a full warmup where enabled, then measure."""
     root = tmp_path / "model"
     shutil.copytree(Path(__file__).parent / "fixtures/tiny", root)
+    if retry:
+        (root / "force-measured-signature").touch()
+        profile = root / "benchmark.yaml"
+        import yaml
+
+        settings = yaml.safe_load(profile.read_text())
+        settings["snapshot"].append("force-measured-signature")
+        profile.write_text(yaml.safe_dump(settings))
     output = tmp_path / "experiment"
     args = [
         "run",
@@ -53,6 +64,16 @@ def test_tiny_model(tmp_path, multiprocess, sharrow):
     assert cli.main(args) == 0
     run = load_run(output)
     assert run["valid"]
+    attempts = run["spec"]["attempts"]
+    assert len(attempts) == (2 if retry else 1)
+    assert attempts[-1]["status"] == "accepted"
+    assert attempts[-1]["compilations"] == 0
+    if retry:
+        assert attempts[0]["status"] == "cache preparation"
+        archived = output / attempts[0]["directory"]
+        assert list(archived.glob("cache-miss-*.txt"))
+        assert json.loads((archived / "status.json").read_text())["returncode"] == 0
+        assert (archived / "output/final_households.csv").exists()
     assert run["components"]["bench_compute"]["n"] == (2 if multiprocess else 1)
     assert run["outputs"]["households"]["rows"] == 4
     assert run["memory"] and all(row["current_bytes"] > 0 for row in run["memory"])
@@ -66,6 +87,16 @@ def test_tiny_model(tmp_path, multiprocess, sharrow):
     assert not list((output / "measured").glob("cache-miss-*"))
     lines = (output / "measured/output/final_households.csv").read_text().splitlines()
     assert set(lines[1:]) == {"1,20", "2,40", "3,60", "4,80"}
+    if retry:
+        # The signature prepared by measurement must survive in the shared cache.
+        repeated = tmp_path / "repeat"
+        args[args.index("--output-dir") + 1] = str(repeated)
+        assert cli.main(args) == 0
+        reused = load_run(repeated)
+        assert reused["valid"]
+        assert len(reused["spec"]["attempts"]) == 1
+        assert reused["spec"]["flow_cache"]["restored_files"] > 0
+        assert "cache preparation" in (output / "report.html").read_text()
 
 
 def test_named_suite(tmp_path):

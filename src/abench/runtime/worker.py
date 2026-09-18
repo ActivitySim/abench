@@ -152,7 +152,7 @@ def make_state(
 
 def run_model(spec, phase):
     """Warm flows with a small serial run; measure the untouched target settings."""
-    spec = phase_spec(spec, phase.name)
+    spec = phase_spec(spec, os.environ.get("BENCH_PHASE_NAME", phase.name))
     write_json(
         phase / "phase-settings.json",
         {key: spec[key] for key in ("households", "multiprocess", "processes")},
@@ -256,8 +256,12 @@ def supervise(spec, phase):
     for name in ("flows", "model"):
         Path(f"/results/cache/{name}").mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, BENCH_MODEL="1", BENCH_PHASE_DIR=str(phase))
-    env["BENCH_STRICT_CACHE"] = (
-        "1" if spec["sharrow"] and phase.name == "measured" else "0"
+    env["BENCH_STRICT_CACHE"] = "0"
+    env["BENCH_TRACK_CACHE"] = (
+        "1"
+        if spec["sharrow"]
+        and os.environ.get("BENCH_PHASE_NAME", phase.name) == "measured"
+        else "0"
     )
     started = time.perf_counter()
     env["BENCH_STARTED_MONOTONIC"] = str(started)
@@ -292,7 +296,9 @@ def supervise(spec, phase):
 if __name__ == "__main__":
     mode, phase_arg = sys.argv[1:]
     phase = Path(phase_arg)
-    spec = json.loads(Path("/results/experiment.json").read_text())
+    spec = json.loads(
+        Path(os.environ.get("BENCH_SPEC_PATH", "/results/experiment.json")).read_text()
+    )
     if mode == "model":
         run_model(spec, phase)
     elif mode == "summary":

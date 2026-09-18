@@ -16,7 +16,7 @@ defaults:
   sharrow: true
   households: ${households}
   # The 5000-household cache build misses some cache builds, so this test uses more
-  warmup_households: ${households}
+  warmup_households: 5000
   memory: 80g
   shm_size: 8g
   platform: linux/arm64

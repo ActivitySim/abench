@@ -23,6 +23,7 @@ OPTIONS = {
     "sharrow",
     "households",
     "warmup_households",
+    "cache_retries",
     "data_dir",
     "config_overlay",
     "cache_from",

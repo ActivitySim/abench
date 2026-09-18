@@ -254,26 +254,35 @@ An existing cache does **not** guarantee that warmup will need no compilation.
 
 Each experiment receives a private copy with source timestamps preserved. Warmup
 always runs, and successful warmups atomically update the persistent cache before
-measurement starts. Compatible simultaneous warmups wait for each other to avoid
-losing compiled signatures; measured runs remain independent. Only `cache/flows`
+measurement starts. Compatible simultaneous experiments wait for each other to avoid losing
+compiled signatures when attempts update Numba cache indexes. Only `cache/flows`
 is shared, never model data, outputs, or shared-memory artifacts. Cache identity
 and reuse counts are recorded in `flow-cache-identity.json` and `experiment.json`.
 The persistent cache can be deleted between runs to reclaim disk space; older
 experiments created before this feature are not automatically imported.
 
-A smaller serial warmup may not exercise every flow signature required by the
-measured run. **Cache misses still invalidate the measured experiment**: abench
-does not silently compile, retry with compilation enabled, or accept incomplete
-cache coverage. Increase the warmup cap when needed.
-The CLI and failure report identify the phase, failed component, cache flow, and
-log path; `cache-miss-details-*.jsonl` records the exact required Numba signature.
-`phase-settings.json` and
-`effective-settings.json` preserve the actual settings for each phase, and the
-report includes the cache-build settings separately from the measured target.
+A smaller serial warmup may not exercise every flow/type signature needed by the
+measured run. Each measured attempt therefore records flow compilation and allows
+it to finish. If compilation occurred, the completed attempt becomes **cache
+preparation**, and none of its runtime or memory results qualify as benchmark
+results. Its diagnostics and outputs are retained under `attempts/attempt-001`,
+`attempts/attempt-002`, etc. Newly compiled flows are published to the shared cache.
 
-Numba compilation of generated flow overloads is rejected during measurement; ordinary non-flow
-compilation and disk-cache loading remain included. This guard uses private
-Numba internals and is covered by real disk-cache hit/miss tests.
+The model then restarts in a fresh container with fresh outputs and model caches,
+using the same settings and expanded flow cache. Only an attempt with **zero flow
+compilations** is accepted. All attempts keep permanent directories under
+`attempts/`; `measured/` links to the accepted attempt. By default abench allows
+**two additional attempts** (three total). Set `--cache-retries N` or
+`cache_retries: N` in YAML; zero allows no retries. If compilation persists, the
+experiment fails with the final attempt's diagnostics retained. Ordinary model
+errors, OOMs, and output validation failures stop immediately and are never
+retried as cache preparation.
+
+The report and `experiment.json` include attempt history. Each attempt retains
+`cache-miss-details-*.jsonl`, its settings, component timings, and memory samples.
+Ordinary non-flow compilation and disk-cache loading remain included in accepted
+measurements. Flow tracking uses private Numba internals and is covered by real
+compilation, cache-hit, and Docker retry tests.
 
 Memory is the whole-container cgroup v2 charge, counting shared pages once.
 Blue is `memory.current` (including file cache, shared memory, and kernel costs).

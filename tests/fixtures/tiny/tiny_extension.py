@@ -1,6 +1,7 @@
 """Tiny real ActivitySim workflow: exercises registration, slicing, and caching."""
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -26,11 +27,16 @@ def bench_initialize(state: workflow.State):
 
 @workflow.step
 def bench_compute(state: workflow.State, households: pd.DataFrame):
-    """Run independently in each slice; measured cache misses must be rejected."""
+    """Exercise compiled overload reuse, including a measured-only test signature."""
     sys.path.insert(0, state.settings.sharrow_cache_dir)
     twice = importlib.import_module("tiny_generated").twice
     households = households.copy()
-    households["value"] = [twice(int(value)) for value in households["value"]]
+    measured_signature = (
+        Path("/model/force-measured-signature").exists()
+        and os.environ.get("BENCH_PHASE_NAME") == "measured"
+    )
+    cast = float if measured_signature else int
+    households["value"] = [int(twice(cast(value))) for value in households["value"]]
     state.add_table("households", households)
 
 
