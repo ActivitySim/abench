@@ -142,12 +142,12 @@ resolves the selectors again, including `validate` and `prepare`. To reproduce a
 earlier suite, replace selectors with `commit: <recorded-full-SHA>`. CLI overrides
 and model profiles still require exact commits.
 
-Override the example's PR without editing YAML:
+Start the suite and answer its input prompts:
 
 ```bash
-uvx abench ./activitysim-prototype-mtc/abench.yaml --set activitysim_pr=1110
+uvx abench ./activitysim-prototype-mtc/abench.yaml
 # Preflight the same selection without running benchmarks:
-uvx abench validate ./activitysim-prototype-mtc/abench.yaml --set activitysim_pr=1110
+uvx abench validate ./activitysim-prototype-mtc/abench.yaml
 ```
 
 Declare user-facing settings in `inputs`, and keep internal reusable values and
@@ -171,7 +171,16 @@ vars:
   label: "${mode}, ${households} households"
 ```
 
-Use repeatable `--set NAME=VALUE` with run, validate, or prepare commands. Quote
+In a terminal, run, validate, and prepare prompt for each input in YAML order.
+Press Enter to accept a displayed default. Required inputs have no default and
+must be entered; empty or invalid answers prompt again with an explanation.
+Ctrl-C cancels before source resolution or downloads. Selected values are printed
+and saved in `suite.json` as `input_values`.
+
+For scripting, `--non-interactive` uses defaults and supplied values without
+prompting. Non-terminal stdin behaves the same way; missing required inputs fail
+instead of hanging. Repeatable `--set NAME=VALUE` can supply values explicitly;
+these inputs are not prompted. Quote
 arguments containing spaces, for example `--set 'label=My experiment'` if `label`
 is declared as a string input. `abench experiment.yaml --help` lists the file's
 inputs, descriptions, defaults, and constraints without requiring input values,
@@ -189,16 +198,17 @@ contacting GitHub, downloading data, or creating outputs.
   expansion. Inputs and vars share one namespace; duplicate names and the
   reserved name `timestamp` are errors. Input names use letters, digits, and
   underscores and cannot start with a digit.
-- Unknown inputs, duplicate overrides, invalid values, and missing required
-  inputs fail before source resolution or downloads. There is no overriding vars.
+- Unknown inputs, duplicate overrides, and invalid explicit values fail before
+  source resolution or downloads. Missing required inputs prompt in a terminal
+  and fail in non-interactive mode. There is no overriding vars.
 - The YAML file is unchanged. `suite.json` records typed `cli_overrides`, effective
   `input_values`, the expanded configuration, and exact source resolutions.
   `experiments.yaml` preserves the original file, so replay its recorded overrides
   too when reproducing a run.
 
 `branch: main` is freshly resolved on **every launch**; there is no saved branch
-SHA to update manually. For the MTC example, use `--set activitysim_pr=1110` and
-optionally `--set households=500000 --set processes=4`.
+SHA to update manually. For the MTC example, enter the PR number when prompted,
+then press Enter twice to accept 500,000 households and 4 processes.
 
 These commands require a release containing this feature. Until then, use
 `uvx --from /path/to/abench abench ...` with this local checkout.
@@ -225,12 +235,18 @@ These commands require a release containing this feature. Until then, use
   order. Failure stops the suite and retains partial results. The combined report
   is `output_root/comparison.html`; individual runs retain their own reports.
   `experiments.yaml` and `suite.json` record the original file and expanded plan.
-- File invocations accept only `--set` input overrides; other model options belong
+- File invocations accept `--set` and `--non-interactive`; other model options belong
   in `defaults` or the relevant run.
 
 This experiment file describes **which tests to run**. A model profile such as
 `benchmark.yaml` describes **how to configure a model**, and remains reusable
 across suites.
+
+Terminal progress identifies the experiment number, image build, warmup, and
+measured attempts/retries. Builds and model phases print elapsed time every
+15 seconds; model phases also show current and peak cgroup memory when samples
+are available. Full console output stays in the printed log paths. These are
+status updates, not an estimated completion percentage.
 
 ## Run controls
 

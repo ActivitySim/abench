@@ -21,6 +21,7 @@ from .common import read_json, write_json
 from .failures import BenchmarkFailure, describe_failure
 from .flow_cache import publish_flows, reuse_flows
 from .profiles import load_profile, validate_model
+from .progress import run_logged
 from .report import load_run, report
 from .sources import resolve_sources
 
@@ -30,8 +31,7 @@ PACKAGE = Path(__file__).resolve().parent
 def command(args, log=None):
     """Keep build/run output on disk and propagate failures to the caller."""
     if log:
-        with log.open("w") as stream:
-            subprocess.run(args, stdout=stream, stderr=subprocess.STDOUT, check=True)
+        run_logged(args, log)
     else:
         return subprocess.check_output(args, text=True).strip()
 
@@ -253,6 +253,11 @@ def main(argv=None):
             metavar="NAME=VALUE",
             help="override a declared experiment input (repeatable)",
         )
+        suite_parser.add_argument(
+            "--non-interactive",
+            action="store_true",
+            help="use defaults and --set values without prompting (required inputs must be supplied)",
+        )
         suite_args = suite_parser.parse_args(candidate)
         return run_suite(
             suite_args.experiment_file,
@@ -260,6 +265,7 @@ def main(argv=None):
             prepare_only=argv[0] == "prepare",
             validate_only=argv[0] == "validate",
             assignments=suite_args.set,
+            interactive=not suite_args.non_interactive and sys.stdin.isatty(),
         )
     action = argv.pop(0) if argv and argv[0] in ("run", "report", "validate") else "run"
     args = p.parse_args(argv)
@@ -578,6 +584,9 @@ def entrypoint():
     """Expose CLI errors without an unnecessary Python traceback."""
     try:
         sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nBenchmark cancelled.", file=sys.stderr)
+        sys.exit(130)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"Benchmark failed: {error}", file=sys.stderr)
         sys.exit(1)

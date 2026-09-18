@@ -208,6 +208,7 @@ def test_model_failure_stops_suite_and_reports_partial_results(tmp_path, monkeyp
 
 
 def test_cli_file_dispatch_and_validation(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     calls = []
     monkeypatch.setattr(
         experiments,
@@ -221,6 +222,10 @@ def test_cli_file_dispatch_and_validation(tmp_path, monkeypatch):
     assert cli.main([str(path), "--set", "activitysim_pr=1110"]) == 0
     assert cli.main(["validate", str(path), "--set=activitysim_pr=1110"]) == 0
     assert cli.main(["prepare", str(path), "--set", "activitysim_pr=1110"]) == 0
+    calls = [
+        (path, {k: v for k, v in options.items() if k != "interactive"})
+        for path, options in calls
+    ]
     assert calls == [
         (path, dict(validate_only=False, prepare_only=False, assignments=[])),
         (path, dict(validate_only=False, prepare_only=False, assignments=[])),

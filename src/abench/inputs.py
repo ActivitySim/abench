@@ -90,7 +90,28 @@ def input_schema(document):
     return inputs
 
 
-def resolve_inputs(document, assignments):
+def parse_value(name, spec, text):
+    """Convert terminal or CLI text using the declared scalar type."""
+    kind = spec["type"]
+    try:
+        if kind == "integer":
+            if not re.fullmatch(r"[+-]?[0-9]+", text):
+                raise ValueError()
+            value = int(text)
+        elif kind == "number":
+            value = float(text)
+        elif kind == "boolean":
+            if text.lower() not in ("true", "false"):
+                raise ValueError()
+            value = text.lower() == "true"
+        else:
+            value = text
+    except ValueError as error:
+        raise ValueError(f"input {name} must be {kind}; got {text!r}") from error
+    return check_value(name, spec, value)
+
+
+def resolve_inputs(document, assignments, interactive=False):
     """Parse NAME=VALUE as declared scalar types, never as arbitrary YAML."""
     schema = input_schema(document)
     explicit = {}
@@ -104,40 +125,28 @@ def resolve_inputs(document, assignments):
             )
         if name in explicit:
             raise ValueError(f"duplicate --set input: {name}")
-        spec = schema[name]
-        kind = spec["type"]
-        try:
-            if kind == "integer":
-                if not re.fullmatch(r"[+-]?[0-9]+", text):
-                    raise ValueError()
-                value = int(text)
-            elif kind == "number":
-                value = float(text)
-            elif kind == "boolean":
-                if text.lower() not in ("true", "false"):
-                    raise ValueError()
-                value = text.lower() == "true"
-            else:
-                value = text
-        except ValueError as error:
-            raise ValueError(f"input {name} must be {kind}; got {text!r}") from error
-        explicit[name] = check_value(name, spec, value)
+        explicit[name] = parse_value(name, schema[name], text)
     values = {}
     for name, spec in schema.items():
         if name in explicit:
             values[name] = explicit[name]
+        elif interactive:
+            values[name] = prompt_value(name, spec)
         elif "default" in spec:
             values[name] = spec["default"]
         else:
             raise ValueError(
-                f"missing required input {name}; supply --set {name}=VALUE"
+                f"missing required input {name}; run in a terminal to answer prompts "
+                f"or supply --set {name}=VALUE"
             )
     return values, explicit
 
 
 def input_help(document):
     """Describe the file's interface even when required inputs are missing."""
-    lines = ["Experiment inputs (override with --set NAME=VALUE):"]
+    lines = [
+        "Experiment inputs (prompted at startup; optionally override with --set NAME=VALUE):"
+    ]
     for name, spec in input_schema(document).items():
         status = "required" if spec.get("required") else f"default: {spec['default']!r}"
         constraints = [
@@ -154,3 +163,32 @@ def input_help(document):
     if len(lines) == 1:
         lines.append("  No inputs declared.")
     return "\n".join(lines)
+
+
+def prompt_value(name, spec):
+    """Keep asking until the user supplies a valid value or accepts a default."""
+    if spec.get("description"):
+        print(f"{name}: {spec['description']}", flush=True)
+    constraints = ", ".join(
+        f"{key}: {spec[key]}"
+        for key in ("choices", "minimum", "maximum")
+        if key in spec
+    )
+    suffix = f" [{spec['default']}]" if "default" in spec else " (required)"
+    prompt = f"  {name} ({spec['type']}{'; ' + constraints if constraints else ''}){suffix}: "
+    while True:
+        try:
+            text = input(prompt)
+        except EOFError as error:
+            raise ValueError(
+                f"Input ended while asking for {name}; experiment not started"
+            ) from error
+        if not text.strip():
+            if "default" in spec:
+                return spec["default"]
+            print(f"  {name} is required; enter a value.", flush=True)
+            continue
+        try:
+            return parse_value(name, spec, text)
+        except ValueError as error:
+            print(f"  {error}. Try again.", flush=True)

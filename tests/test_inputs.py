@@ -159,3 +159,104 @@ def test_help_and_invalid_input_never_resolve_sources(tmp_path, monkeypatch, cap
         with pytest.raises(ValueError):
             cli.main([str(path), *extra])
     assert not (tmp_path / "results").exists()
+
+
+def test_interactive_defaults_required_and_validation(monkeypatch, capsys):
+    answers = iter(["", "", "bad", "0", "1110", "", ""])
+    prompts = []
+
+    def respond(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", respond)
+    values, explicit = resolve_inputs(
+        {
+            "inputs": {
+                "households": {"type": "integer", "default": 500000},
+                "pr": {"type": "integer", "required": True, "minimum": 1},
+                "sharrow": {"type": "boolean", "default": True},
+                "label": {"type": "string", "default": ""},
+            }
+        },
+        [],
+        interactive=True,
+    )
+    assert values == dict(households=500000, pr=1110, sharrow=True, label="")
+    assert explicit == {}
+    assert "[500000]" in prompts[0]
+    assert "(required)" in prompts[1]
+    output = capsys.readouterr().out
+    assert "pr is required" in output and "Try again" in output
+
+
+def test_prompt_eof_cancels(monkeypatch):
+    def ended(prompt):
+        raise EOFError()
+
+    monkeypatch.setattr("builtins.input", ended)
+    with pytest.raises(ValueError, match="experiment not started"):
+        resolve_inputs(
+            {"inputs": {"x": {"type": "integer", "required": True}}},
+            [],
+            interactive=True,
+        )
+
+
+def test_explicit_values_skip_prompts(monkeypatch):
+    def unexpected(prompt):
+        pytest.fail("explicit input should not prompt")
+
+    monkeypatch.setattr("builtins.input", unexpected)
+    assert resolve_inputs(
+        {"inputs": {"x": {"type": "integer", "required": True}}},
+        ["x=1"],
+        interactive=True,
+    )[0] == {"x": 1}
+
+
+def test_cli_terminal_detection(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        experiments, "run_suite", lambda *a, **kw: calls.append(kw) or 0
+    )
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    path = str(tmp_path / "suite.yaml")
+    cli.main([path])
+    cli.main([path, "--non-interactive"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    cli.main([path])
+    assert [call["interactive"] for call in calls] == [True, False, False]
+
+
+def test_prompted_inputs_are_saved_before_execution(tmp_path, monkeypatch):
+    import json
+
+    path = tmp_path / "suite.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "inputs": {"households": {"type": "integer", "default": 4}},
+                "output_root": "results",
+                "defaults": {"households": "${households}"},
+                "runs": {"test": {}},
+            }
+        )
+    )
+    answers = []
+    monkeypatch.setattr("builtins.input", lambda prompt: answers.append(prompt) or "5")
+    monkeypatch.setattr(experiments, "report", lambda *a: None)
+    calls = []
+
+    def invoke(argv):
+        assert len(answers) == 1
+        assert argv[argv.index("--households") + 1] == "5"
+        calls.append(argv[0])
+        return 0
+
+    experiments.run_suite(path, invoke, interactive=True)
+    plan = json.loads((tmp_path / "results/suite.json").read_text())
+    assert plan["input_values"] == {"households": 5}
+    assert plan["cli_overrides"] == {}
+    assert calls == ["validate", "run"]

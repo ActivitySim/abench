@@ -202,11 +202,13 @@ def read_suite(path):
     return raw, document
 
 
-def load_suite(path, assignments=()):
+def load_suite(path, assignments=(), interactive=False):
     """Resolve typed inputs and expand the suite before any external side effects."""
     path = path.expanduser().resolve()
     raw, document = read_suite(path)
-    input_values, cli_overrides = resolve_inputs(document, assignments)
+    input_values, cli_overrides = resolve_inputs(
+        document, assignments, interactive=interactive
+    )
     document = expand_variables(
         document, datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f"), input_values
     )
@@ -252,11 +254,26 @@ def load_suite(path, assignments=()):
     }
 
 
-def run_suite(path, invoke, validate_only=False, prepare_only=False, assignments=()):
+def run_suite(
+    path,
+    invoke,
+    validate_only=False,
+    prepare_only=False,
+    assignments=(),
+    interactive=False,
+):
     """Preflight every run, execute serially, and preserve partial failure reports."""
-    plan = load_suite(path, assignments=assignments)
+    plan = load_suite(path, assignments=assignments, interactive=interactive)
+    if plan["input_values"]:
+        print(
+            "Selected inputs: "
+            + ", ".join(f"{k}={v}" for k, v in plan["input_values"].items()),
+            flush=True,
+        )
     root = Path(plan["output_root"])
     if not validate_only:
+        if plan["data_assets"]:
+            print("Preparing input data (checking shared cache)…", flush=True)
         prepare_assets(plan["data_assets"])
     if prepare_only:
         print(f"Prepared {len(plan['data_assets'])} assets; no experiments started")
@@ -277,8 +294,10 @@ def run_suite(path, invoke, validate_only=False, prepare_only=False, assignments
     write_json(root / "suite.json", plan)
     completed = []
     try:
-        for run in plan["runs"]:
-            print(f"Running experiment {run['name']}…", flush=True)
+        for number, run in enumerate(plan["runs"], 1):
+            print(
+                f"Experiment {number}/{len(plan['runs'])}: {run['name']}…", flush=True
+            )
             try:
                 code = invoke(["run", *run["argv"]])
             finally:
