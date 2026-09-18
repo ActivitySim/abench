@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -182,6 +183,10 @@ def container_phase(spec, output, data, image, phase_name):
         "run",
         "--name",
         name,
+        # Native Linux bind mounts preserve ownership. Run as the invoking user
+        # so outputs and caches remain writable between attempts and experiments.
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
         "--env",
         f"BENCH_SPEC_PATH=/results/{phase_name}/{snapshot_name}",
         "--env",
