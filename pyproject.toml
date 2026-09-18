@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abench"
+dynamic = ["version"]
+description = "Reproducible ActivitySim runtime and memory benchmarks in Linux containers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+dependencies = ["PyYAML>=6"]
+keywords = ["activitysim", "benchmark", "transportation", "memory", "sharrow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: System :: Benchmark",
+]
+
+[project.urls]
+Homepage = "https://github.com/ActivitySim/abench"
+Documentation = "https://github.com/ActivitySim/abench#readme"
+Repository = "https://github.com/ActivitySim/abench"
+Issues = "https://github.com/ActivitySim/abench/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "abench.__version__"}
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pandas<3", "pyarrow", "numba", "ruff", "build"]
+
+[project.scripts]
+abench = "abench.cli:entrypoint"
+
+[tool.setuptools.package-data]
+abench = ["Dockerfile", "profiles/*.yaml"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["docker: Linux Docker integration tests (opt in with ABENCH_DOCKER_TESTS=1)"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["abench"]

@@ -1,0 +1,33 @@
+# Run from any directory: abench /path/to/abench/examples/sandag-chunked.yaml
+schema_version: 1
+vars:
+  households: 28365
+  model: ../../sandag-abm3-example
+  activitysim_main: 5c6fae24a91a57a2d6dfc2e1dbe062a61d94545a
+  activitysim_pr1110: 51e298a84276813946e1d623c9a5785e078e022f
+output_root: ../experiments/sandag-chunked-${timestamp}
+defaults:
+  model_dir: ${model}
+  profile: sandag
+  data_dir: ${model}/benchmarking-data
+  config_overlay: ["${model}/configs_explicit_chunk"]
+  multiprocess: true
+  processes: 4
+  sharrow: true
+  households: ${households}
+  # The 5000-household cache build misses some cache builds, so this test uses more
+  warmup_households: 5000
+  memory: 80g
+  shm_size: 8g
+  platform: linux/arm64
+  sources:
+    - sharrow=ActivitySim/sharrow@fc175b27d8e0c5d202721c67d96b050e6117b235
+runs:
+  main:
+    label: SANDAG main — explicit chunking
+    sources:
+      - activitysim=ActivitySim/activitysim@${activitysim_main}
+  pr1110:
+    label: SANDAG PR1110 — explicit chunking
+    sources:
+      - activitysim=ActivitySim/activitysim@${activitysim_pr1110}

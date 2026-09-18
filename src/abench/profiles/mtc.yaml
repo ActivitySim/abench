@@ -1,0 +1,46 @@
+schema_version: 1
+settings:
+  chunk_size: 0
+  use_shadow_pricing: false
+  trace_hh_id: null
+  trace_od: null
+  resume_after: null
+  instrument: false
+  memory_profile: false
+  expression_profile: false
+  checkpoints: true
+  rng_base_seed: 0
+  benchmarking: false
+exclude_models:
+- track_skim_usage
+constraints:
+- multimethod<2
+- pandas<3
+input_tables:
+  households: {}
+  persons: {}
+  land_use: {}
+output_tables:
+  households: {}
+  persons: {}
+  land_use: {}
+  tours: {}
+  trips: {}
+  joint_tour_participants: {}
+  vehicles: {}
+name: MTC prototype
+configs:
+- configs
+mp_configs:
+- configs_mp
+snapshot:
+- configs
+- configs_mp
+data_dir: data_full
+models_from: configs/settings.yaml
+zone_label: zones
+required_inputs:
+- households.csv
+- persons.csv
+- land_use.csv
+- skims.omx

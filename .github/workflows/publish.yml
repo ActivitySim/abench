@@ -1,0 +1,61 @@
+name: Publish to PyPI
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+concurrency:
+  group: pypi-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+  build:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - run: python -m pip install build twine
+      # Build the wheel from the sdist, so both published formats are exercised.
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - run: python -m pip install dist/*.whl
+      - name: Match release tag to package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from importlib.metadata import version
+          expected = 'v' + version('abench')
+          if os.environ['RELEASE_TAG'] != expected:
+              raise SystemExit(f'Release tag must be {expected}')
+          PY
+      - name: Smoke test isolated uvx installation
+        run: |
+          uvx --from "$PWD"/dist/abench-*.whl abench --version
+          uvx --from "$PWD"/dist/abench-*.whl abench --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/abench
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+      - name: Publish distributions using Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
