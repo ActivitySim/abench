@@ -4,8 +4,21 @@ Run reproducible ActivitySim runtime and memory experiments in Linux Docker,
 from macOS or Linux. One runner supports MTC, SANDAG ABM3, and other models through
 small YAML profiles. ActivitySim itself does not need to be installed on the host.
 
+With [uv](https://docs.astral.sh/uv/), run without managing a Python environment:
+
 ```bash
-python -m pip install /path/to/abench
+uvx abench --help
+uvx abench experiments.yaml
+```
+
+For a specific release use `uvx abench@0.1.0 experiments.yaml`; use
+`uvx abench@latest` to refresh to the latest release. Docker and model data must
+still be available locally. macOS and Linux hosts are supported.
+
+Alternatively, install with pip:
+
+```bash
+python -m pip install abench
 abench run --model-dir /path/to/sandag-abm3-example --profile sandag \
   --source activitysim=ActivitySim/activitysim@<full-40-character-SHA> \
   --source sharrow=ActivitySim/sharrow@<full-40-character-SHA> \
@@ -331,3 +344,8 @@ and reports. They do not require either example repository or large datasets.
 Adapted from the MTC and SANDAG benchmark harnesses developed in this workspace.
 The original measurement approach was informed by WSP's Lighthouse production
 benchmark. See LICENSE for the retained BSD license.
+
+## Releases
+
+See [RELEASING.md](https://github.com/ActivitySim/abench/blob/main/RELEASING.md)
+for Trusted Publishing setup and release instructions.

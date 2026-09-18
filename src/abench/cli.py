@@ -61,6 +61,7 @@ def parser():
         description=__doc__,
         epilog="Named experiments: abench experiments.yaml; preflight: abench validate experiments.yaml",
     )
+    p.add_argument("--version", action="version", version=f"abench {__version__}")
     p.add_argument("--model-dir", type=Path, default=Path.cwd())
     p.add_argument("--profile", default="benchmark.yaml")
     p.add_argument(
