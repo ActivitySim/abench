@@ -11,7 +11,7 @@ uvx abench --help
 uvx abench experiments.yaml
 ```
 
-For a specific release use `uvx abench@0.1.0 experiments.yaml`; use
+For a specific release use `uvx abench@0.1.1 experiments.yaml`; use
 `uvx abench@latest` to refresh to the latest release. Docker and model data must
 still be available locally. macOS and Linux hosts are supported.
 
@@ -41,13 +41,45 @@ promised to work. Build/runtime failures retain diagnostics and a failure report
 
 ## Named experiment files
 
+You can pass a model directory instead of a YAML file:
+
+```bash
+abench /path/to/model
+```
+
+Abench looks for `.yaml` and `.yml` files directly inside `/path/to/model/.abench/`
+(no recursive search). In a terminal it lists them alphabetically and asks which
+experiment to run, then prompts for that experiment's inputs. Enter chooses the
+first file; a single file still gets a selection prompt. Only the selected file
+is loaded. `run`, `validate`, and `prepare` all support directory selection.
+
+`abench /path/to/model --help` lists available files without prompting or running
+anything. Missing `.abench` directories and empty file lists produce clear errors.
+Without a terminal, or with `--non-interactive`, one file is selected automatically;
+multiple files require passing the desired YAML path directly.
+
+Relative paths remain relative to the selected YAML file. For a file inside
+`.abench`, use `model_dir: ..` and, for example, `data_dir: ../data_full` and
+`output_root: ../benchmark-runs/run-${timestamp}` to reference the parent model.
+For declared downloads, keep unpack destinations inside `.abench` (for example,
+`unpack: data_full` with `data_dir: data_full`); asset destinations cannot use `..`.
+Moving an existing suite into `.abench` requires reviewing its paths.
+
+
 Write common options once and override only what differs between runs:
 
 ```yaml
 schema_version: 1
+inputs:
+  households:
+    type: integer
+    default: 28365
+    minimum: 0
+  warmup_households:
+    type: integer
+    default: 5000
+    minimum: 1
 vars:
-  households: 28365
-  warmup_households: 5000
   model: /path/to/sandag-abm3-example
 output_root: ./results/sandag-${timestamp}
 defaults:
@@ -86,14 +118,132 @@ in the repository. Its paths assume abench and the SANDAG repository are sibling
 The pinned `main` revision is the one used in the earlier trials, not a moving
 branch reference.
 
+To compare **current main against a PR**, named suites also accept source mappings
+with `branch` or `pr` in place of `commit`:
+
+```yaml
+schema_version: 1
+inputs:
+  activitysim_pr:
+    type: integer
+    required: true
+    minimum: 1
+    description: ActivitySim PR number to compare against current main
+output_root: benchmark-runs/mtc-${timestamp}
+defaults:
+  profile: mtc
+  households: 500000
+  multiprocess: true
+  processes: 4
+  sharrow: true
+  sources:
+    - sharrow=ActivitySim/sharrow@fc175b27d8e0c5d202721c67d96b050e6117b235
+runs:
+  main:
+    sources:
+      - name: activitysim
+        repository: ActivitySim/activitysim
+        branch: main
+  pr:
+    label: ActivitySim PR ${activitysim_pr}
+    sources:
+      - name: activitysim
+        repository: ActivitySim/activitysim
+        pr: ${activitysim_pr}
+```
+
+Each mapping must provide exactly one of `commit`, `branch`, or `pr`. Branch/PR
+selectors work for any source package in a suite, including extras/subdirectories.
+Abench uses host Git and network access to resolve each selector once per suite,
+before running models, and passes only exact commits to the builds. `pr` selects
+`refs/pull/<number>/head` in the named repository, including PRs from forks;
+it does **not** select the synthetic merge commit. Use a positive integer PR number.
+`branch` names the branch without `refs/heads/`.
+
+The resolved commits are printed and recorded in `suite.json` alongside the
+original YAML, and in each experiment's source provenance. A new invocation
+resolves the selectors again, including `validate` and `prepare`. To reproduce an
+earlier suite, replace selectors with `commit: <recorded-full-SHA>`. CLI overrides
+and model profiles still require exact commits.
+
+Start the suite and answer its input prompts:
+
+```bash
+uvx abench ./activitysim-prototype-mtc/abench.yaml
+# Preflight the same selection without running benchmarks:
+uvx abench validate ./activitysim-prototype-mtc/abench.yaml
+```
+
+Declare user-facing settings in `inputs`, and keep internal reusable values and
+expressions in `vars`. Only inputs can be overridden. For example:
+
+```yaml
+inputs:
+  households:
+    type: integer
+    default: 500000
+    minimum: 0
+    description: Households to sample; 0 uses the full population
+  mode:
+    type: string
+    default: chunked
+    choices: [chunked, unchunked]
+  sharrow:
+    type: boolean
+    default: true
+vars:
+  label: "${mode}, ${households} households"
+```
+
+In a terminal, run, validate, and prepare prompt for each input in YAML order.
+Press Enter to accept a displayed default. Required inputs have no default and
+must be entered; empty or invalid answers prompt again with an explanation.
+Ctrl-C cancels before source resolution or downloads. Selected values are printed
+and saved in `suite.json` as `input_values`.
+
+For scripting, `--non-interactive` uses defaults and supplied values without
+prompting. Non-terminal stdin behaves the same way; missing required inputs fail
+instead of hanging. Repeatable `--set NAME=VALUE` can supply values explicitly;
+these inputs are not prompted. Quote
+arguments containing spaces, for example `--set 'label=My experiment'` if `label`
+is declared as a string input. `abench experiment.yaml --help` lists the file's
+inputs, descriptions, defaults, and constraints without requiring input values,
+contacting GitHub, downloading data, or creating outputs.
+
+- Every input requires a `type`: `string`, `integer`, `number`, or `boolean`.
+  Give it either a typed YAML `default` or `required: true`, but not both.
+- Optional `choices` restricts allowed values; `minimum`/`maximum` are inclusive
+  bounds for numeric inputs. Numbers must be finite. Boolean overrides accept
+  `true` or `false` (case insensitive), not `yes`, `no`, `1`, or `0`.
+- Values are converted according to their declared type, never parsed as YAML.
+  Strings retain literal text, including `=`, spaces, and `${...}`. Defaults and
+  input declarations are literal too; use `vars` for derived expressions.
+- Defaults are applied first, followed by command-line overrides, then `${...}`
+  expansion. Inputs and vars share one namespace; duplicate names and the
+  reserved name `timestamp` are errors. Input names use letters, digits, and
+  underscores and cannot start with a digit.
+- Unknown inputs, duplicate overrides, and invalid explicit values fail before
+  source resolution or downloads. Missing required inputs prompt in a terminal
+  and fail in non-interactive mode. There is no overriding vars.
+- The YAML file is unchanged. `suite.json` records typed `cli_overrides`, effective
+  `input_values`, the expanded configuration, and exact source resolutions.
+  `experiments.yaml` preserves the original file, so replay its recorded overrides
+  too when reproducing a run.
+
+`branch: main` is freshly resolved on **every launch**; there is no saved branch
+SHA to update manually. For the MTC example, enter the PR number when prompted,
+then press Enter twice to accept 500,000 households and 4 processes.
+
+These features are available in abench 0.1.1 and later.
+
 - `defaults` accepts CLI options using underscores (`shm_size`, `config_overlay`,
   etc.). Use `multiprocess: false` for serial execution and `sharrow: false` to
   disable Sharrow. `sources` accepts the same strings/mappings as model profiles.
 - `runs` is an ordered mapping of names to overrides. Each run inherits defaults;
   ordinary values and lists are replaced. **Sources merge by normalized package
   name**, so changing ActivitySim does not discard the shared Sharrow pin.
-- `${name}` substitutes a reusable scalar from `vars`; terms can reference other
-  terms. A whole-value reference preserves its type, including numbers/booleans.
+- `${name}` substitutes a scalar from `inputs` or `vars`; vars can reference
+  other vars and inputs. A whole-value reference preserves its type, including numbers/booleans.
   Undefined references and cycles are errors. No shell or environment expansion
   is performed. `${timestamp}` is a built-in UTC launch identifier shared by all
   runs, with microseconds to avoid reusing output directories.
@@ -108,12 +258,18 @@ branch reference.
   order. Failure stops the suite and retains partial results. The combined report
   is `output_root/comparison.html`; individual runs retain their own reports.
   `experiments.yaml` and `suite.json` record the original file and expanded plan.
-- File invocations do not accept additional CLI overrides. Edit `defaults` or the
-  relevant run to keep the file a complete description of the experiment.
+- File invocations accept `--set` and `--non-interactive`; other model options belong
+  in `defaults` or the relevant run.
 
 This experiment file describes **which tests to run**. A model profile such as
 `benchmark.yaml` describes **how to configure a model**, and remains reusable
 across suites.
+
+Terminal progress identifies the experiment number, image build, warmup, and
+measured attempts/retries. Builds and model phases print elapsed time every
+15 seconds; model phases also show current and peak cgroup memory when samples
+are available. Full console output stays in the printed log paths. These are
+status updates, not an estimated completion percentage.
 
 ## Run controls
 
@@ -349,3 +505,47 @@ benchmark. See LICENSE for the retained BSD license.
 
 See [RELEASING.md](https://github.com/ActivitySim/abench/blob/main/RELEASING.md)
 for Trusted Publishing setup and release instructions.
+
+## Downloading model data
+
+Experiment suites may declare `data_assets` using ActivitySim's external-example
+asset names, URLs, SHA-256 checksums, and `unpack` destinations:
+
+```yaml
+data_assets:
+  name: prototype_mtc_extended
+  assets:
+    data_full.tar.zst:
+      url: https://github.com/ActivitySim/activitysim-prototype-mtc/releases/download/v1.3.4/data_full.tar.zst
+      sha256: b402506a61055e2d38621416dd9a5c7e3cf7517c0a9ae5869f6d760c03284ef3
+      unpack: data_full
+```
+
+`abench experiment.yaml` prepares these assets before validating model inputs or
+starting Docker. `abench prepare experiment.yaml` only prepares data. `abench
+validate experiment.yaml` remains read-only: it checks declarations and requires
+inputs to be present (use `prepare` first for a fresh clone). Asset destinations
+are relative to the experiment YAML, regardless of `model_dir`; point each run's
+`data_dir` to the appropriate destination. Variable substitutions also work here.
+
+The default download cache is exactly
+`platformdirs.user_cache_dir("ActivitySim")/External-Examples/<name>/`—the same
+layout used by `activitysim.examples.external.download_external_example`.
+`name` is optional; `cache_dir` can override the root before appending `name`.
+Keep names and checksums identical to ActivitySim's declarations to share files.
+For assets cached by direct `download_asset(link=True)` calls, set `cache_dir`
+to that call's `platformdirs.user_data_dir("ActivitySim")` and omit `name`.
+No host ActivitySim installation is needed.
+
+Checksums are required and verified before reuse. For a `.gz` URL whose asset name
+omits `.gz`, the checksum covers the decompressed file, as in ActivitySim.
+Archives (`.tar.zst`, `.tar.gz`, `.zip`) use the archive checksum and preserve their
+internal paths when unpacking. Verified extracted contents are cached under
+`.abench-extracted/<sha256>/` beside the archive. Whole unpacked directories are
+linked to the suite, and abench resolves `data_dir` before Docker mounts it.
+Individual files are copied so external file symlinks cannot break inside Docker.
+Existing destinations must match; modified inputs are never silently replaced.
+Archive links, special files, and paths escaping the destination are rejected.
+The original instructions and resolved cache locations are saved in `suite.json`.
+
+Data preparation is available in abench 0.1.1 and later.

@@ -21,6 +21,7 @@ from .common import read_json, write_json
 from .failures import BenchmarkFailure, describe_failure
 from .flow_cache import publish_flows, reuse_flows
 from .profiles import load_profile, validate_model
+from .progress import run_logged
 from .report import load_run, report
 from .sources import resolve_sources
 
@@ -30,8 +31,7 @@ PACKAGE = Path(__file__).resolve().parent
 def command(args, log=None):
     """Keep build/run output on disk and propagate failures to the caller."""
     if log:
-        with log.open("w") as stream:
-            subprocess.run(args, stdout=stream, stderr=subprocess.STDOUT, check=True)
+        run_logged(args, log)
     else:
         return subprocess.check_output(args, text=True).strip()
 
@@ -60,7 +60,7 @@ def positive(value):
 def parser():
     p = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Named experiments: abench experiments.yaml; preflight: abench validate experiments.yaml",
+        epilog="Named experiments: abench experiments.yaml [--set NAME=VALUE]; preflight: abench validate experiments.yaml [--set NAME=VALUE]; data only: abench prepare experiments.yaml",
     )
     p.add_argument("--version", action="version", version=f"abench {__version__}")
     p.add_argument("--model-dir", type=Path, default=Path.cwd())
@@ -228,19 +228,55 @@ def main(argv=None):
     p = parser()
     argv = list(sys.argv[1:] if argv is None else argv)
     # A file invocation stays separate from model profiles and ordinary flags.
-    candidate = argv[1:] if argv and argv[0] in ("run", "validate") else argv
+    candidate = argv[1:] if argv and argv[0] in ("run", "validate", "prepare") else argv
     if (
         candidate
         and not candidate[0].startswith("-")
-        and candidate[0] not in ("run", "report", "validate")
+        and candidate[0] not in ("run", "report", "validate", "prepare")
     ):
-        if len(candidate) != 1:
-            p.error(
-                "an experiment file cannot be mixed with command-line overrides; edit its defaults or runs"
-            )
-        from .experiments import run_suite
+        from .discovery import directory_help, select_experiment
+        from .experiments import read_suite, run_suite
+        from .inputs import input_help
 
-        return run_suite(Path(candidate[0]), main, validate_only=argv[0] == "validate")
+        target = Path(candidate[0]).expanduser()
+        suite_parser = argparse.ArgumentParser(
+            prog="abench",
+            description="Run an experiment YAML file or choose from a directory’s .abench folder.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=(
+                directory_help(target)
+                if target.is_dir()
+                else input_help(read_suite(target)[1])
+            )
+            if any(flag in candidate[1:] for flag in ("--help", "-h"))
+            else None,
+        )
+        suite_parser.add_argument(
+            "experiment_file", type=Path, help="experiment YAML file or model directory"
+        )
+        suite_parser.add_argument(
+            "--set",
+            action="append",
+            default=[],
+            metavar="NAME=VALUE",
+            help="override a declared experiment input (repeatable)",
+        )
+        suite_parser.add_argument(
+            "--non-interactive",
+            action="store_true",
+            help="use defaults and --set values without prompting (required inputs must be supplied)",
+        )
+        suite_args = suite_parser.parse_args(candidate)
+        interactive = not suite_args.non_interactive and sys.stdin.isatty()
+        selected = select_experiment(suite_args.experiment_file, interactive)
+        return run_suite(
+            selected,
+            main,
+            prepare_only=argv[0] == "prepare",
+            validate_only=argv[0] == "validate",
+            assignments=suite_args.set,
+            interactive=interactive,
+        )
     action = argv.pop(0) if argv and argv[0] in ("run", "report", "validate") else "run"
     args = p.parse_args(argv)
     if action == "report":
@@ -558,6 +594,9 @@ def entrypoint():
     """Expose CLI errors without an unnecessary Python traceback."""
     try:
         sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nBenchmark cancelled.", file=sys.stderr)
+        sys.exit(130)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"Benchmark failed: {error}", file=sys.stderr)
         sys.exit(1)

@@ -99,23 +99,53 @@ def test_tiny_model(tmp_path, multiprocess, sharrow, retry):
         assert "cache preparation" in (output / "report.html").read_text()
 
 
-def test_named_suite(tmp_path):
+def test_named_suite(tmp_path, monkeypatch):
     """Exercise file dispatch, shared defaults, serial/MP overrides, and comparison."""
     import yaml
 
     root = tmp_path / "model"
     shutil.copytree(Path(__file__).parent / "fixtures/tiny", root)
+    # Exercise archive preparation and a linked data directory through a real
+    # container mount, starting with no model inputs in the checkout.
+    import hashlib
+    import io
+    import zipfile
+
+    from abench import assets
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as stream:
+        stream.write(root / "data/households.csv", "households.csv")
+    payload = archive.getvalue()
+    shutil.rmtree(root / "data")
+    monkeypatch.setattr(
+        assets.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(payload)
+    )
     path = tmp_path / "experiments.yaml"
     path.write_text(
         yaml.safe_dump(
             dict(
                 schema_version=1,
+                inputs={
+                    "households": {"type": "integer", "default": 3, "minimum": 1},
+                    "sharrow": {"type": "boolean", "default": False},
+                },
                 output_root="results",
+                data_assets=dict(
+                    cache_dir="downloads",
+                    assets={
+                        "data.zip": dict(
+                            url="https://example.test/data.zip",
+                            sha256=hashlib.sha256(payload).hexdigest(),
+                            unpack="model/data",
+                        )
+                    },
+                ),
                 defaults=dict(
                     model_dir="model",
                     flow_cache_dir="shared-flows",
-                    sharrow=True,
-                    households=4,
+                    sharrow="${sharrow}",
+                    households="${households}",
                     warmup_households=2,
                     memory="3g",
                     shm_size="256m",
@@ -129,13 +159,18 @@ def test_named_suite(tmp_path):
             sort_keys=False,
         )
     )
-    assert cli.main([str(path)]) == 0
+    assert cli.main([str(path), "--set", "households=4", "--set", "sharrow=true"]) == 0
     root = tmp_path / "results"
     runs = json.loads((root / "comparison.json").read_text())
     assert len(runs) == 2 and all(run["valid"] for run in runs)
     assert [run["components"]["bench_compute"]["n"] for run in runs] == [1, 2]
     assert (root / "experiments.yaml").read_text() == path.read_text()
-    assert (root / "suite.json").is_file()
+    suite = json.loads((root / "suite.json").read_text())
+    assert (
+        suite["input_values"]
+        == suite["cli_overrides"]
+        == {"households": 4, "sharrow": True}
+    )
     for name in ("serial", "parallel"):
         warmup = json.loads(
             (root / name / "warmup/effective-settings.json").read_text()
