@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -255,6 +256,14 @@ def supervise(spec, phase):
     (phase / "output").mkdir()
     for name in ("flows", "model"):
         Path(f"/results/cache/{name}").mkdir(parents=True, exist_ok=True)
+    # Fail before running models if the configured compilation cache is unusable.
+    numba_cache = Path(os.environ["NUMBA_CACHE_DIR"])
+    try:
+        numba_cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(dir=numba_cache):
+            pass
+    except OSError as error:
+        raise RuntimeError(f"Numba cache is not writable: {numba_cache}") from error
     env = dict(os.environ, BENCH_MODEL="1", BENCH_PHASE_DIR=str(phase))
     env["BENCH_STRICT_CACHE"] = "0"
     env["BENCH_TRACK_CACHE"] = (

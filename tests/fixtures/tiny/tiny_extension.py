@@ -28,6 +28,12 @@ def bench_initialize(state: workflow.State):
 @workflow.step
 def bench_compute(state: workflow.State, households: pd.DataFrame):
     """Exercise compiled overload reuse, including a measured-only test signature."""
+    # Unlike generated modules, installed Sharrow helpers live in root-owned
+    # site-packages. Importing them must work as the unprivileged model user,
+    # including in spawned workers, and their compiled code must load on reuse.
+    from sharrow.maths import piece
+
+    assert piece(3.0, 1.0, 4.0) == 2.0
     sys.path.insert(0, state.settings.sharrow_cache_dir)
     twice = importlib.import_module("tiny_generated").twice
     households = households.copy()

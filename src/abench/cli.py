@@ -187,6 +187,12 @@ def container_phase(spec, output, data, image, phase_name):
         # so outputs and caches remain writable between attempts and experiments.
         "--user",
         f"{os.getuid()}:{os.getgid()}",
+        # Installed packages and the default home are not writable by this UID.
+        # Configure Numba before Python starts, including all spawned workers.
+        # Keep compiled artifacts in the shared flow snapshot so warmup work is
+        # reusable across measured attempts and compatible experiments.
+        "--env",
+        "NUMBA_CACHE_DIR=/results/cache/flows/.numba",
         "--env",
         f"BENCH_SPEC_PATH=/results/{phase_name}/{snapshot_name}",
         "--env",
