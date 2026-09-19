@@ -269,10 +269,14 @@ This experiment file describes **which tests to run**. A model profile such as
 across suites.
 
 Terminal progress identifies the experiment number, image build, warmup, and
-measured attempts/retries. Builds and model phases print elapsed time every
-15 seconds; model phases also show current and peak cgroup memory when samples
-are available. Full console output stays in the printed log paths. These are
-status updates, not an estimated completion percentage.
+measured attempts/retries. During builds and model phases, an interactive terminal
+shows live elapsed time, current and peak cgroup memory (when available), and a
+panel with the last 12 lines of the run log. Ctrl-C cancels the command. Full
+console output stays in the printed log paths; elapsed time and memory status
+are saved every 15 seconds in a sibling `console.progress.log` (or
+`build.progress.log` for builds). Redirected output and non-interactive terminals
+only print start and finish summaries. These are status updates, not an estimated
+completion percentage.
 
 ## Run controls
 
