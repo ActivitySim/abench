@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import __version__
 from .attempts import measured_attempts
+from .awake import benchmark_invocation, keep_awake
 from .common import read_json, write_json
 from .failures import BenchmarkFailure, describe_failure
 from .flow_cache import publish_flows, reuse_flows
@@ -61,6 +62,11 @@ def parser():
     p = argparse.ArgumentParser(
         description=__doc__,
         epilog="Named experiments: abench experiments.yaml [--set NAME=VALUE]; preflight: abench validate experiments.yaml [--set NAME=VALUE]; data only: abench prepare experiments.yaml; publish retained results: abench publish OUTPUT_DIRECTORY [--dry-run]",
+    )
+    p.add_argument(
+        "--allow-sleep",
+        action="store_true",
+        help="disable automatic macOS idle sleep prevention",
     )
     p.add_argument("--version", action="version", version=f"abench {__version__}")
     p.add_argument("--model-dir", type=Path, default=Path.cwd())
@@ -289,6 +295,11 @@ def main(argv=None):
             "--publish-dry-run",
             action="store_true",
             help="run benchmarks and prepare the comment and charts without publishing",
+        )
+        suite_parser.add_argument(
+            "--allow-sleep",
+            action="store_true",
+            help="disable automatic macOS idle sleep prevention",
         )
         suite_args = suite_parser.parse_args(candidate)
         interactive = not suite_args.non_interactive and sys.stdin.isatty()
@@ -618,7 +629,9 @@ def main(argv=None):
 def entrypoint():
     """Expose CLI errors without an unnecessary Python traceback."""
     try:
-        sys.exit(main())
+        with keep_awake(enabled=benchmark_invocation(sys.argv[1:])):
+            code = main()
+        sys.exit(code)
     except KeyboardInterrupt:
         print("\nBenchmark cancelled.", file=sys.stderr)
         sys.exit(130)

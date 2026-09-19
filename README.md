@@ -346,6 +346,16 @@ smoke test should use a designated test PR, never a production PR by default.
 
 ## Run controls
 
+On macOS, benchmark commands automatically run `/usr/bin/caffeinate -i` to prevent
+idle system sleep for the entire invocation, including preparation, builds,
+warmup, measured attempts, reporting, and PR publication. The display can still
+sleep. The assertion is released on completion or cancellation; it also expires
+if the abench process exits unexpectedly. Other platforms are unchanged.
+Use `--allow-sleep` to opt out, for example `abench experiments.yaml --allow-sleep`.
+Report-only, publish-only, validation, preparation-only, and help commands do not
+start caffeinate. This prevents idle sleep; it does not override explicit sleep
+or closing a laptop lid.
+
 - `--single-process` (default), or `--multiprocess --processes N`. The count applies
   to every sliced stage; coordinators are additional processes.
 - `--sharrow` (default) or `--no-sharrow`. Sharrow enabled requires its source pin.
