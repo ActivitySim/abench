@@ -1,5 +1,7 @@
 """Discover and choose experiment instructions stored inside a model directory."""
 
+from .menus import choose
+
 
 def instruction_files(directory):
     """List immediate YAML files deterministically without loading any suite."""
@@ -46,20 +48,7 @@ def select_experiment(path, interactive):
             + ", ".join(p.name for p in files)
             + ". Run in a terminal to choose, or pass the experiment YAML path directly."
         )
-    print(f"Experiments in {path / '.abench'}:", flush=True)
-    for number, file in enumerate(files, 1):
-        print(f"  {number}. {file.name}", flush=True)
-    while True:
-        try:
-            answer = input(f"Choose experiment [1] (1–{len(files)}): ").strip()
-        except EOFError as error:
-            raise ValueError(
-                "Input ended while choosing an experiment; nothing started"
-            ) from error
-        if not answer:
-            answer = "1"
-        if answer.isascii() and answer.isdigit() and 1 <= int(answer) <= len(files):
-            chosen = files[int(answer) - 1]
-            print(f"Selected experiment: {chosen.name}", flush=True)
-            return chosen
-        print(f"Enter a number from 1 to {len(files)}.", flush=True)
+    selected = choose(
+        f"Experiment in {path / '.abench'}", [file.name for file in files]
+    )
+    return files[selected]

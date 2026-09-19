@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-dependencies = ["PyYAML>=6", "platformdirs>=3", "zstandard>=0.21"]
+dependencies = ["PyYAML>=6", "platformdirs>=3", "zstandard>=0.21", "prompt_toolkit>=3.0.36,<4"]
 keywords = ["activitysim", "benchmark", "transportation", "memory", "sharrow"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -39,6 +39,17 @@ abench = "abench.cli:entrypoint"
 
 [tool.setuptools.package-data]
 abench = ["Dockerfile", "profiles/*.yaml"]
+
+# uvx --from <checkout> must notice source edits, not just metadata changes.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "README.md" },
+    { file = "MANIFEST.in" },
+    { file = "src/abench/**/*.py" },
+    { file = "src/abench/Dockerfile" },
+    { file = "src/abench/profiles/*.yaml" },
+]
 
 [tool.ruff]
 line-length = 88

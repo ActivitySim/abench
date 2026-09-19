@@ -49,8 +49,8 @@ abench /path/to/model
 
 Abench looks for `.yaml` and `.yml` files directly inside `/path/to/model/.abench/`
 (no recursive search). In a terminal it lists them alphabetically and asks which
-experiment to run, then prompts for that experiment's inputs. Enter chooses the
-first file; a single file still gets a selection prompt. Only the selected file
+experiment to run, then prompts for that experiment's inputs. Use ↑/↓ to move the highlighted selection and Enter to confirm. The first file
+is initially selected; a single file still gets a selection prompt. Only the selected file
 is loaded. `run`, `validate`, and `prepare` all support directory selection.
 
 `abench /path/to/model --help` lists available files without prompting or running
@@ -196,7 +196,10 @@ vars:
 ```
 
 In a terminal, run, validate, and prepare prompt for each input in YAML order.
-Press Enter to accept a displayed default. Required inputs have no default and
+Inputs with `choices` use the same arrow-key menu, with the declared default
+initially highlighted (or the first option if required). Enter confirms the
+selection and preserves its declared type. Other inputs use text prompts.
+Press Enter to accept a displayed default. Required text inputs have no default and
 must be entered; empty or invalid answers prompt again with an explanation.
 Ctrl-C cancels before source resolution or downloads. Selected values are printed
 and saved in `suite.json` as `input_values`.
@@ -266,12 +269,118 @@ This experiment file describes **which tests to run**. A model profile such as
 across suites.
 
 Terminal progress identifies the experiment number, image build, warmup, and
-measured attempts/retries. Builds and model phases print elapsed time every
-15 seconds; model phases also show current and peak cgroup memory when samples
-are available. Full console output stays in the printed log paths. These are
-status updates, not an estimated completion percentage.
+measured attempts/retries. During builds and model phases, an interactive terminal
+shows live elapsed time, current and peak cgroup memory (when available), and a
+panel with the last 12 lines of the run log. Ctrl-C cancels the command. Full
+console output stays in the printed log paths; elapsed time and memory status
+are saved every 15 seconds in a sibling `console.progress.log` (or
+`build.progress.log` for builds). Redirected output and non-interactive terminals
+only print start and finish summaries. These are status updates, not an estimated
+completion percentage.
+
+## Publishing benchmark results to a PR
+
+A suite can post one results comment after its final comparison report. Add an
+explicit target (the repository is always on github.com):
+
+```yaml
+inputs:
+  pr:
+    type: integer
+    required: true
+    minimum: 1
+publish:
+  github:
+    repository: ActivitySim/activitysim
+    pr: ${pr}
+    baseline: main
+```
+
+`baseline` names a run in `runs` and defaults to the first run. The posting target
+is independent of source selection: use `pr: ${pr}` in an ActivitySim source
+mapping to benchmark that PR's pinned head as well. See
+[`examples/sandag-pr.yaml`](examples/sandag-pr.yaml) for a complete example with a
+pinned baseline; adjust its model/data paths and baseline commit for your model.
+
+```bash
+abench examples/sandag-pr.yaml --set pr=1110
+# Run benchmarks, but only generate the local comment and charts:
+abench examples/sandag-pr.yaml --set pr=1110 --publish-dry-run
+# Inspect or publish retained results without rerunning benchmarks:
+abench publish /path/to/suite-output --dry-run
+abench publish /path/to/suite-output
+# Read local status, or verify the comment still exists on GitHub:
+abench publish /path/to/suite-output --status
+abench publish /path/to/suite-output --verify
+# The permanent launcher works from any working directory:
+/path/to/suite-output/publication/publish.sh
+/path/to/suite-output/publication/publish.sh --dry-run
+```
+
+Publication requires GitHub CLI 2.99 or newer with `gh pr comment --attach`, an
+authenticated account, and repository write access for image uploads. Use
+`gh auth login --hostname github.com` (OAuth), or a classic personal access token
+through `GH_TOKEN`. Other token types and GitHub Enterprise Server image uploads
+are not supported by this first release. `gh` remains optional for ordinary runs
+and publication dry runs. Authentication and PR access are checked before asset
+preparation or benchmark execution when publication is enabled; validation and
+prepare-only commands do not publish. Tokens are never written to experiment
+metadata or passed into benchmark containers.
+
+The comment contains elapsed time and peak memory, percentage changes against the
+baseline for valid runs with matching comparison settings, run settings, source
+commits, memory traces, and component-runtime charts. Invalid runs have no change
+claims and are excluded from the runtime chart; unstarted runs are identified.
+PR head/base commits are recorded at startup, and a head change during execution
+is noted when posting. These are observations, not statistical significance tests.
+
+The `publication/` directory retains `comment.md`, `memory.svg`, `runtimes.svg`,
+and `state.json` with the comment ID/URL and publication status. `STATUS.md` shows
+whether publication is pending, failed, uncertain, or published, with attempt time,
+errors, a retry command, and the comment link. It reflects local knowledge;
+`--verify` checks GitHub without uploading or editing anything. Verification
+failures preserve the previous publication record. A missing previously published
+comment is flagged and is not automatically recreated.
+
+The executable `publish.sh` is permanent: it is safe to call repeatedly and passes
+through `--dry-run`, `--status`, or `--verify`. It prefers `abench` on PATH, then
+uses `uvx --refresh --from <recorded-checkout>` when a development checkout was
+available when the bundle was prepared. It reports an actionable error if neither
+is available and never stores credentials. Output paths with spaces are supported.
+Existing suites can create these helpers with `abench publish OUTPUT --status`
+without reading measurement data or contacting GitHub.
+
+The final console message explicitly says whether results were published, gives
+the comment URL on success, or gives the launcher command when action is needed.
+A connection failure after posting begins is marked as an uncertain outcome;
+retrying reconciles the comment marker before attempting another post.
+
+The exact upload body is retained as `upload.md`. A retry searches for the suite's
+unique comment
+marker before posting; a recorded successful publication is a no-op. Independent
+suite executions get separate comments. Simultaneous publication of the same
+output directory is blocked. Partial uploads can leave unused GitHub attachments,
+but the local reports are retained and a retry can complete the comment.
+
+A posting error fails the command and prints the retry command. If the benchmark
+also failed, its failure remains primary and the publication error is printed
+separately. The full HTML/JSON comparison remains local; this release uploads only
+the summary and SVG figures, not raw logs, model data, or the interactive HTML.
+Images must fit GitHub's 10 MB attachment limit, and summaries are limited to
+60,000 characters. Publication transport tests simulate GitHub; a live attachment
+smoke test should use a designated test PR, never a production PR by default.
 
 ## Run controls
+
+On macOS, benchmark commands automatically run `/usr/bin/caffeinate -i` to prevent
+idle system sleep for the entire invocation, including preparation, builds,
+warmup, measured attempts, reporting, and PR publication. The display can still
+sleep. The assertion is released on completion or cancellation; it also expires
+if the abench process exits unexpectedly. Other platforms are unchanged.
+Use `--allow-sleep` to opt out, for example `abench experiments.yaml --allow-sleep`.
+Report-only, publish-only, validation, preparation-only, and help commands do not
+start caffeinate. This prevents idle sleep; it does not override explicit sleep
+or closing a laptop lid.
 
 - `--single-process` (default), or `--multiprocess --processes N`. The count applies
   to every sliced stage; coordinators are additional processes.
