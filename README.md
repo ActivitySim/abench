@@ -309,6 +309,12 @@ abench examples/sandag-pr.yaml --set pr=1110 --publish-dry-run
 # Inspect or publish retained results without rerunning benchmarks:
 abench publish /path/to/suite-output --dry-run
 abench publish /path/to/suite-output
+# Read local status, or verify the comment still exists on GitHub:
+abench publish /path/to/suite-output --status
+abench publish /path/to/suite-output --verify
+# The permanent launcher works from any working directory:
+/path/to/suite-output/publication/publish.sh
+/path/to/suite-output/publication/publish.sh --dry-run
 ```
 
 Publication requires GitHub CLI 2.99 or newer with `gh pr comment --attach`, an
@@ -329,8 +335,28 @@ PR head/base commits are recorded at startup, and a head change during execution
 is noted when posting. These are observations, not statistical significance tests.
 
 The `publication/` directory retains `comment.md`, `memory.svg`, `runtimes.svg`,
-and `state.json` with the comment ID/URL and publication status. The exact upload
-body is retained as `upload.md`. A retry searches for the suite's unique comment
+and `state.json` with the comment ID/URL and publication status. `STATUS.md` shows
+whether publication is pending, failed, uncertain, or published, with attempt time,
+errors, a retry command, and the comment link. It reflects local knowledge;
+`--verify` checks GitHub without uploading or editing anything. Verification
+failures preserve the previous publication record. A missing previously published
+comment is flagged and is not automatically recreated.
+
+The executable `publish.sh` is permanent: it is safe to call repeatedly and passes
+through `--dry-run`, `--status`, or `--verify`. It prefers `abench` on PATH, then
+uses `uvx --refresh --from <recorded-checkout>` when a development checkout was
+available when the bundle was prepared. It reports an actionable error if neither
+is available and never stores credentials. Output paths with spaces are supported.
+Existing suites can create these helpers with `abench publish OUTPUT --status`
+without reading measurement data or contacting GitHub.
+
+The final console message explicitly says whether results were published, gives
+the comment URL on success, or gives the launcher command when action is needed.
+A connection failure after posting begins is marked as an uncertain outcome;
+retrying reconciles the comment marker before attempting another post.
+
+The exact upload body is retained as `upload.md`. A retry searches for the suite's
+unique comment
 marker before posting; a recorded successful publication is a no-op. Independent
 suite executions get separate comments. Simultaneous publication of the same
 output directory is blocked. Partial uploads can leave unused GitHub attachments,

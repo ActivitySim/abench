@@ -244,13 +244,29 @@ def main(argv=None):
 
         publish_parser = argparse.ArgumentParser(prog="abench publish")
         publish_parser.add_argument("output_directory", type=Path)
-        publish_parser.add_argument(
+        publish_mode = publish_parser.add_mutually_exclusive_group()
+        publish_mode.add_argument(
             "--dry-run",
             action="store_true",
             help="generate the local bundle without GitHub access",
         )
+        publish_mode.add_argument(
+            "--status",
+            action="store_true",
+            help="show recorded publication status without contacting GitHub",
+        )
+        publish_mode.add_argument(
+            "--verify",
+            action="store_true",
+            help="check publication status on GitHub without posting",
+        )
         options = publish_parser.parse_args(argv[1:])
-        publish(options.output_directory, dry_run=options.dry_run)
+        publish(
+            options.output_directory,
+            dry_run=options.dry_run,
+            status_only=options.status,
+            verify=options.verify,
+        )
         return 0
     # A file invocation stays separate from model profiles and ordinary flags.
     candidate = argv[1:] if argv and argv[0] in ("run", "validate", "prepare") else argv

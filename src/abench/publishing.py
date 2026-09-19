@@ -3,9 +3,13 @@
 import fcntl
 import json
 import re
+import shlex
 import subprocess
 import uuid
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
 
 from . import __version__
@@ -142,8 +146,170 @@ def standalone(svg):
     )
 
 
-def build_bundle(root):
-    """Rebuild shareable artifacts from retained results, without GitHub access."""
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def local_checkout():
+    """Find a development checkout, including when running in a uvx environment."""
+    candidates = [Path(__file__).resolve().parents[2]]
+    try:
+        direct = json.loads(distribution("abench").read_text("direct_url.json") or "{}")
+        url = urlparse(direct.get("url", ""))
+        if url.scheme == "file" and url.netloc in ("", "localhost"):
+            candidates.append(Path(unquote(url.path)))
+    except (ValueError, OSError, PackageNotFoundError):
+        pass
+    return next(
+        (
+            str(p)
+            for p in candidates
+            if (p / "pyproject.toml").is_file() and (p / "src/abench").is_dir()
+        ),
+        None,
+    )
+
+
+def write_launcher(bundle, checkout):
+    launcher = bundle / "publish.sh"
+    fallback = ""
+    if checkout:
+        quoted = shlex.quote(checkout)
+        fallback = f"""if command -v uvx >/dev/null 2>&1 && [ -f {quoted}/pyproject.toml ]; then
+    exec uvx --refresh --from {quoted} abench publish "$suite_dir" "$@"
+fi
+"""
+    launcher.write_text(
+        """#!/bin/sh
+# Permanent, safe-to-repeat abench publication launcher. No credentials stored.
+set -eu
+publication_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+suite_dir=$(dirname -- "$publication_dir")
+if command -v abench >/dev/null 2>&1; then
+    exec abench publish "$suite_dir" "$@"
+fi
+"""
+        + fallback
+        + """echo 'Cannot find abench. Install a version with PR publishing support, or restore the recorded checkout and install uv.' >&2
+exit 127
+"""
+    )
+    launcher.chmod(0o755)
+
+
+STATUS_LABELS = {
+    "prepared": "Not published",
+    "failed": "Publication failed",
+    "posting": "Publication outcome uncertain",
+    "uncertain": "Publication outcome uncertain",
+    "published": "Published",
+    "missing": "Previously published comment not found",
+}
+
+
+def save_status(bundle, state):
+    """JSON is authoritative; the Markdown file is a readable projection."""
+    write_json(bundle / "state.json", state)
+    label = STATUS_LABELS.get(state["status"], state["status"])
+    target = state["target"]
+    lines = [
+        "# Publication status",
+        "",
+        f"**{label}**",
+        "",
+        f"Target: https://github.com/{target['repository']}/pull/{target['pr']}",
+        f"Last publication attempt: {state.get('last_attempt_at', 'Never recorded')}",
+    ]
+    if state.get("comment_url"):
+        lines += ["", f"[Open the recorded GitHub comment]({state['comment_url']})"]
+    if state.get("last_verified_at"):
+        lines += [f"Last GitHub check: {state['last_verified_at']}"]
+    if state.get("error"):
+        lines += ["", f"Last error: {cell(state['error'])}"]
+    if state.get("verification_error"):
+        lines += [
+            "",
+            f"GitHub verification failed: {cell(state['verification_error'])}",
+        ]
+    if state["status"] in ("posting", "uncertain"):
+        lines += [
+            "",
+            "GitHub may have accepted the comment. Retry checks for the existing comment before posting again.",
+        ]
+    command = shlex.quote(str(bundle / "publish.sh"))
+    lines += [
+        "",
+        "Publish or retry (safe to repeat):",
+        "",
+        "```sh",
+        command,
+        "```",
+        "",
+        "Preview with `--dry-run`; inspect local status with `--status`; check GitHub with `--verify`.",
+        "",
+        "This file records local knowledge; use --verify to check whether the comment still exists.",
+    ]
+    (bundle / "STATUS.md").write_text("\n".join(lines) + "\n")
+
+
+def completion(bundle, state):
+    if state["status"] == "published":
+        print(f"Results published: {state['comment_url']}")
+    elif state["status"] in ("posting", "uncertain"):
+        print("Results saved; publication outcome uncertain.")
+    else:
+        print("Results saved but not published.")
+    print(f"Publication status: {bundle / 'STATUS.md'}")
+    if state["status"] != "published":
+        print(f"Publish / retry: {shlex.quote(str(bundle / 'publish.sh'))}")
+
+
+def find_comment(state):
+    target = state["target"]
+    pages = json.loads(
+        gh(
+            "api",
+            f"repos/{target['repository']}/issues/{target['pr']}/comments",
+            "--hostname",
+            "github.com",
+            "--paginate",
+            "--slurp",
+        )
+    )
+    marker = f"<!-- abench:{state['id']} -->"
+    return next(
+        (
+            c
+            for page in pages
+            for c in page
+            if marker in (c.get("body") or "") or c["id"] == state.get("comment_id")
+        ),
+        None,
+    )
+
+
+def verify_publication(bundle, state):
+    """Read GitHub only; never recreate or edit a comment during verification."""
+    try:
+        found = find_comment(state)
+    except (ValueError, OSError) as error:
+        state["verification_error"] = str(error)
+        save_status(bundle, state)
+        raise
+    state["last_verified_at"] = now()
+    state.pop("verification_error", None)
+    if found:
+        state.update(
+            status="published", comment_id=found["id"], comment_url=found["html_url"]
+        )
+        state.pop("error", None)
+    elif state.get("comment_url"):
+        state["status"] = "missing"
+    save_status(bundle, state)
+
+
+def prepare_publication(root):
+    """Create local publication controls without reading benchmark measurements."""
     plan = read_json(root / "suite.json")
     if not plan:
         raise ValueError(f"No suite.json in {root}")
@@ -160,7 +326,20 @@ def build_bundle(root):
         raise ValueError("Publication target differs from the saved publication state")
     if not state:
         state = {"target": config, "id": str(uuid.uuid4()), "status": "prepared"}
+        state["checkout"] = local_checkout()
         write_json(state_path, state)
+    if "checkout" not in state:
+        state["checkout"] = local_checkout()
+    save_status(bundle, state)
+    write_launcher(bundle, state.get("checkout"))
+    return bundle, state
+
+
+def build_bundle(root):
+    """Rebuild shareable artifacts from retained results, without GitHub access."""
+    bundle, state = prepare_publication(root)
+    plan = read_json(root / "suite.json")
+    config = state["target"]
     marker = f"<!-- abench:{state['id']} -->"
     runs = []
     names = []
@@ -240,8 +419,6 @@ def build_bundle(root):
         "![Component runtimes](./runtimes.svg)",
         "",
         "Valid runs only. Mean ± population standard deviation across worker executions, not confidence intervals. Parallel component times must not be summed as wall time.",
-        "",
-        "The interactive HTML report and JSON remain in the experiment output directory.",
     ]
     (bundle / "comment.md").write_text("\n".join(lines) + "\n")
     xmax = (
@@ -280,7 +457,7 @@ def build_bundle(root):
     return bundle, state
 
 
-def publish(root, *, dry_run=False):
+def publish(root, *, dry_run=False, status_only=False, verify=False):
     """Publish once per suite; recover a successful comment after a lost response."""
     root = Path(root).expanduser().resolve()
     if not (root / "suite.json").is_file():
@@ -290,30 +467,30 @@ def publish(root, *, dry_run=False):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError("Publication is already running for this suite") from error
+        if status_only or verify:
+            bundle, state = prepare_publication(root)
+            if verify:
+                verify_publication(bundle, state)
+            print((bundle / "STATUS.md").read_text())
+            return state.get("comment_url")
         bundle, state = build_bundle(root)
         if dry_run:
             print(f"Publication preview: {bundle / 'comment.md'}")
+            completion(bundle, state)
             return None
+        if state.get("status") == "missing":
+            raise ValueError(
+                "The previously published comment was not found on GitHub; not reposting automatically. See publication/STATUS.md."
+            )
         if state.get("comment_url"):
-            print(f"Already published: {state['comment_url']}")
+            completion(bundle, state)
             return state["comment_url"]
         try:
+            state["last_attempt_at"] = now()
+            save_status(bundle, state)
             config = state["target"]
             current = preflight(config)
-            marker = f"<!-- abench:{state['id']} -->"
-            comments = json.loads(
-                gh(
-                    "api",
-                    f"repos/{config['repository']}/issues/{config['pr']}/comments",
-                    "--hostname",
-                    "github.com",
-                    "--paginate",
-                    "--slurp",
-                )
-            )
-            found = next(
-                (c for page in comments for c in page if marker in c["body"]), None
-            )
+            found = find_comment(state)
             if not found:
                 snapshot = read_json(root / "suite.json").get("publication_pr", {})
                 body = (bundle / "comment.md").read_text()
@@ -332,8 +509,8 @@ def publish(root, *, dry_run=False):
                 # Resolve relative image references from the bundle, including
                 # output directories containing spaces or Markdown punctuation.
                 (bundle / "upload.md").write_text(body)
-                state["status"] = "posting"
-                write_json(bundle / "state.json", state)
+                state.update(status="posting", last_attempt_at=now())
+                save_status(bundle, state)
                 url = gh(
                     "pr",
                     "comment",
@@ -356,16 +533,26 @@ def publish(root, *, dry_run=False):
                 found = {"id": int(match[1]), "html_url": match[0]}
             state.update(
                 status="published",
+                published_at=state.get("published_at") or now(),
                 comment_id=found["id"],
                 comment_url=found["html_url"],
             )
             state.pop("error", None)
-            write_json(bundle / "state.json", state)
-        except (ValueError, OSError) as error:
-            state.update(status="failed", error=str(error))
-            write_json(bundle / "state.json", state)
+            save_status(bundle, state)
+        except (ValueError, OSError, KeyboardInterrupt) as error:
+            state.update(
+                status="uncertain"
+                if state["status"] in ("posting", "uncertain")
+                else "failed",
+                error=str(error) or "Publication interrupted",
+                last_attempt_at=state.get("last_attempt_at") or now(),
+            )
+            save_status(bundle, state)
+            completion(bundle, state)
+            if isinstance(error, KeyboardInterrupt):
+                raise
             raise ValueError(
-                f"{error}\nResults retained. Retry: abench publish {root}"
+                f"{error}\nResults retained. Retry: {shlex.quote(str(bundle / 'publish.sh'))}"
             ) from error
-        print(f"Published: {state['comment_url']}")
+        completion(bundle, state)
         return state["comment_url"]
