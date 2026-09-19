@@ -11,7 +11,7 @@ uvx abench --help
 uvx abench experiments.yaml
 ```
 
-For a specific release use `uvx abench@0.1.0 experiments.yaml`; use
+For a specific release use `uvx abench@0.1.1 experiments.yaml`; use
 `uvx abench@latest` to refresh to the latest release. Docker and model data must
 still be available locally. macOS and Linux hosts are supported.
 
@@ -119,8 +119,7 @@ The pinned `main` revision is the one used in the earlier trials, not a moving
 branch reference.
 
 To compare **current main against a PR**, named suites also accept source mappings
-with `branch` or `pr` in place of `commit` (local development feature, not in
-PyPI 0.1.0 yet):
+with `branch` or `pr` in place of `commit`:
 
 ```yaml
 schema_version: 1
@@ -235,8 +234,7 @@ contacting GitHub, downloading data, or creating outputs.
 SHA to update manually. For the MTC example, enter the PR number when prompted,
 then press Enter twice to accept 500,000 households and 4 processes.
 
-These commands require a release containing this feature. Until then, use
-`uvx --from /path/to/abench abench ...` with this local checkout.
+These features are available in abench 0.1.1 and later.
 
 - `defaults` accepts CLI options using underscores (`shm_size`, `config_overlay`,
   etc.). Use `multiprocess: false` for serial execution and `sharrow: false` to
@@ -550,6 +548,4 @@ Existing destinations must match; modified inputs are never silently replaced.
 Archive links, special files, and paths escaping the destination are rejected.
 The original instructions and resolved cache locations are saved in `suite.json`.
 
-This feature is not present in abench 0.1.0. Until the next release, install the
-updated checkout (`uv tool install /path/to/abench`) or run it with
-`uvx --from /path/to/abench abench /path/to/model/abench.yaml`.
+Data preparation is available in abench 0.1.1 and later.
