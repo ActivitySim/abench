@@ -278,6 +278,72 @@ are saved every 15 seconds in a sibling `console.progress.log` (or
 only print start and finish summaries. These are status updates, not an estimated
 completion percentage.
 
+## Publishing benchmark results to a PR
+
+A suite can post one results comment after its final comparison report. Add an
+explicit target (the repository is always on github.com):
+
+```yaml
+inputs:
+  pr:
+    type: integer
+    required: true
+    minimum: 1
+publish:
+  github:
+    repository: ActivitySim/activitysim
+    pr: ${pr}
+    baseline: main
+```
+
+`baseline` names a run in `runs` and defaults to the first run. The posting target
+is independent of source selection: use `pr: ${pr}` in an ActivitySim source
+mapping to benchmark that PR's pinned head as well. See
+[`examples/sandag-pr.yaml`](examples/sandag-pr.yaml) for a complete example with a
+pinned baseline; adjust its model/data paths and baseline commit for your model.
+
+```bash
+abench examples/sandag-pr.yaml --set pr=1110
+# Run benchmarks, but only generate the local comment and charts:
+abench examples/sandag-pr.yaml --set pr=1110 --publish-dry-run
+# Inspect or publish retained results without rerunning benchmarks:
+abench publish /path/to/suite-output --dry-run
+abench publish /path/to/suite-output
+```
+
+Publication requires GitHub CLI 2.99 or newer with `gh pr comment --attach`, an
+authenticated account, and repository write access for image uploads. Use
+`gh auth login --hostname github.com` (OAuth), or a classic personal access token
+through `GH_TOKEN`. Other token types and GitHub Enterprise Server image uploads
+are not supported by this first release. `gh` remains optional for ordinary runs
+and publication dry runs. Authentication and PR access are checked before asset
+preparation or benchmark execution when publication is enabled; validation and
+prepare-only commands do not publish. Tokens are never written to experiment
+metadata or passed into benchmark containers.
+
+The comment contains elapsed time and peak memory, percentage changes against the
+baseline for valid runs with matching comparison settings, run settings, source
+commits, memory traces, and component-runtime charts. Invalid runs have no change
+claims and are excluded from the runtime chart; unstarted runs are identified.
+PR head/base commits are recorded at startup, and a head change during execution
+is noted when posting. These are observations, not statistical significance tests.
+
+The `publication/` directory retains `comment.md`, `memory.svg`, `runtimes.svg`,
+and `state.json` with the comment ID/URL and publication status. The exact upload
+body is retained as `upload.md`. A retry searches for the suite's unique comment
+marker before posting; a recorded successful publication is a no-op. Independent
+suite executions get separate comments. Simultaneous publication of the same
+output directory is blocked. Partial uploads can leave unused GitHub attachments,
+but the local reports are retained and a retry can complete the comment.
+
+A posting error fails the command and prints the retry command. If the benchmark
+also failed, its failure remains primary and the publication error is printed
+separately. The full HTML/JSON comparison remains local; this release uploads only
+the summary and SVG figures, not raw logs, model data, or the interactive HTML.
+Images must fit GitHub's 10 MB attachment limit, and summaries are limited to
+60,000 characters. Publication transport tests simulate GitHub; a live attachment
+smoke test should use a designated test PR, never a production PR by default.
+
 ## Run controls
 
 - `--single-process` (default), or `--multiprocess --processes N`. The count applies

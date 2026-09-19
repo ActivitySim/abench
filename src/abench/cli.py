@@ -60,7 +60,7 @@ def positive(value):
 def parser():
     p = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Named experiments: abench experiments.yaml [--set NAME=VALUE]; preflight: abench validate experiments.yaml [--set NAME=VALUE]; data only: abench prepare experiments.yaml",
+        epilog="Named experiments: abench experiments.yaml [--set NAME=VALUE]; preflight: abench validate experiments.yaml [--set NAME=VALUE]; data only: abench prepare experiments.yaml; publish retained results: abench publish OUTPUT_DIRECTORY [--dry-run]",
     )
     p.add_argument("--version", action="version", version=f"abench {__version__}")
     p.add_argument("--model-dir", type=Path, default=Path.cwd())
@@ -233,6 +233,19 @@ def container_phase(spec, output, data, image, phase_name):
 def main(argv=None):
     p = parser()
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "publish":
+        from .publishing import publish
+
+        publish_parser = argparse.ArgumentParser(prog="abench publish")
+        publish_parser.add_argument("output_directory", type=Path)
+        publish_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="generate the local bundle without GitHub access",
+        )
+        options = publish_parser.parse_args(argv[1:])
+        publish(options.output_directory, dry_run=options.dry_run)
+        return 0
     # A file invocation stays separate from model profiles and ordinary flags.
     candidate = argv[1:] if argv and argv[0] in ("run", "validate", "prepare") else argv
     if (
@@ -272,6 +285,11 @@ def main(argv=None):
             action="store_true",
             help="use defaults and --set values without prompting (required inputs must be supplied)",
         )
+        suite_parser.add_argument(
+            "--publish-dry-run",
+            action="store_true",
+            help="run benchmarks and prepare the comment and charts without publishing",
+        )
         suite_args = suite_parser.parse_args(candidate)
         interactive = not suite_args.non_interactive and sys.stdin.isatty()
         selected = select_experiment(suite_args.experiment_file, interactive)
@@ -282,6 +300,7 @@ def main(argv=None):
             validate_only=argv[0] == "validate",
             assignments=suite_args.set,
             interactive=interactive,
+            **({"publish_dry_run": True} if suite_args.publish_dry_run else {}),
         )
     action = argv.pop(0) if argv and argv[0] in ("run", "report", "validate") else "run"
     args = p.parse_args(argv)

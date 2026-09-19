@@ -1,0 +1,58 @@
+# Run from any directory: abench /path/to/abench/examples/sandag-pr.yaml
+schema_version: 1
+# Publishing is opt-in through this block. Use --publish-dry-run to preview locally.
+publish:
+  github:
+    repository: ActivitySim/activitysim
+    pr: ${pr}
+    baseline: main
+inputs:
+  pr:
+    type: integer
+    required: true
+    minimum: 1
+    description: ActivitySim PR to benchmark and comment on
+  households:
+    type: integer
+    default: 28365
+    minimum: 0
+    description: Households to sample from benchmarking-data; 0 uses all
+  processes:
+    type: integer
+    default: 4
+    minimum: 1
+  warmup_households:
+    type: integer
+    default: 5000
+    minimum: 1
+vars:
+  model: ../../sandag-abm3-example
+  activitysim_main: 5c6fae24a91a57a2d6dfc2e1dbe062a61d94545a
+output_root: ../experiments/sandag-pr${pr}-${timestamp}
+defaults:
+  model_dir: ${model}
+  profile: sandag
+  data_dir: ${model}/benchmarking-data
+  config_overlay: ["${model}/configs_explicit_chunk"]
+  multiprocess: true
+  processes: ${processes}
+  sharrow: true
+  households: ${households}
+  # Cache misses in the measured run trigger a retry using the compiled flows.
+  warmup_households: ${warmup_households}
+  memory: 80g
+  shm_size: 8g
+  platform: linux/arm64
+  sources:
+    - sharrow=ActivitySim/sharrow@fc175b27d8e0c5d202721c67d96b050e6117b235
+runs:
+  main:
+    label: SANDAG main — explicit chunking
+    sources:
+      - activitysim=ActivitySim/activitysim@${activitysim_main}
+  candidate:
+    label: SANDAG PR${pr} — explicit chunking
+    sources:
+      - name: activitysim
+        repository: ActivitySim/activitysim
+        pr: ${pr}

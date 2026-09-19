@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from . import publishing
 from .assets import plan_assets, prepare_assets
 from .common import write_json
 from .inputs import resolve_inputs
@@ -196,6 +197,7 @@ def read_suite(path):
         "runs",
         "output_root",
         "data_assets",
+        "publish",
     }
     if unknown:
         raise ValueError(f"unknown experiment file fields: {sorted(unknown)}")
@@ -218,6 +220,7 @@ def load_suite(path, assignments=(), interactive=False):
     runs = document.get("runs")
     if not isinstance(runs, dict) or not runs:
         raise ValueError("runs must be a nonempty mapping of run names to options")
+    publishing.configuration(document.get("publish"), runs)
     output = document.get("output_root")
     if not isinstance(output, str) or not output:
         raise ValueError("output_root must be a path")
@@ -261,6 +264,7 @@ def run_suite(
     prepare_only=False,
     assignments=(),
     interactive=False,
+    publish_dry_run=False,
 ):
     """Preflight every run, execute serially, and preserve partial failure reports."""
     plan = load_suite(path, assignments=assignments, interactive=interactive)
@@ -271,6 +275,11 @@ def run_suite(
             flush=True,
         )
     root = Path(plan["output_root"])
+    publish_config = publishing.configuration(
+        plan["configuration"].get("publish"), [r["name"] for r in plan["runs"]]
+    )
+    if publish_config and not (validate_only or prepare_only or publish_dry_run):
+        plan["publication_pr"] = publishing.preflight(publish_config)
     if not validate_only:
         if plan["data_assets"]:
             print("Preparing input data (checking shared cache)…", flush=True)
@@ -293,6 +302,7 @@ def run_suite(
     (root / "experiments.yaml").write_text(plan["original_yaml"])
     write_json(root / "suite.json", plan)
     completed = []
+    failed = False
     try:
         for number, run in enumerate(plan["runs"], 1):
             print(
@@ -306,9 +316,21 @@ def run_suite(
                 if (Path(run["output_dir"]) / "experiment.json").is_file():
                     completed.append(Path(run["output_dir"]))
             if code:
+                failed = True
                 return code
+    except BaseException:
+        failed = True
+        raise
     finally:
         if completed:
             report(completed, root / "comparison.html")
             print(f"Comparison: {root / 'comparison.html'}", flush=True)
+        if publish_config:
+            try:
+                publishing.publish(root, dry_run=publish_dry_run)
+            except (ValueError, OSError) as error:
+                if not failed:
+                    raise
+                # Keep the model failure primary, but never hide a posting failure.
+                print(f"Publication failed: {error}", flush=True)
     return 0
