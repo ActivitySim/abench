@@ -11,7 +11,7 @@ uvx abench --help
 uvx abench experiments.yaml
 ```
 
-For a specific release use `uvx abench@0.1.1 experiments.yaml`; use
+For a specific release use `uvx abench@0.1.2 experiments.yaml`; use
 `uvx abench@latest` to refresh to the latest release. Docker and model data must
 still be available locally. macOS and Linux hosts are supported.
 
@@ -413,6 +413,12 @@ persistent host cache defaults to `~/.cache/abench/flows`. Change it with
 `--flow-cache-dir PATH` (`flow_cache_dir` in YAML), or disable automatic reads and
 writes with `--no-reuse-flows` (`reuse_flows: false`). `--cache-from` remains an
 explicit seed option with its existing stricter dependency checks.
+
+Containers set `NUMBA_CACHE_DIR` to `/results/cache/flows/.numba`, a writable
+directory included in those snapshots. This covers installed-library helpers
+(such as `sharrow.maths`) as well as generated flows without writing into
+root-owned site-packages or relying on the container user's home directory.
+Warmup may recompile entries from older snapshots that used Numba's default paths.
 
 Compatibility uses the **installed** Sharrow, Numba, llvmlite, and NumPy versions,
 plus their source repository/commit identities when applicable, Python version,

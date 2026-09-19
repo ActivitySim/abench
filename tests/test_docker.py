@@ -64,6 +64,7 @@ def test_tiny_model(tmp_path, multiprocess, sharrow, retry):
     assert cli.main(args) == 0
     run = load_run(output)
     assert run["valid"]
+    assert list((output / "cache/flows/.numba").rglob("maths.piece-*.nbc"))
     attempts = run["spec"]["attempts"]
     assert len(attempts) == (2 if retry else 1)
     assert attempts[-1]["status"] == "accepted"
