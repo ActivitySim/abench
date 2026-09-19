@@ -15,22 +15,26 @@ def instructions(tmp_path):
     return folder
 
 
-def test_selection_order_and_invalid_answers(tmp_path, monkeypatch, capsys):
+def test_selection_order(tmp_path, monkeypatch):
     folder = instructions(tmp_path)
-    assert [p.name for p in instruction_files(tmp_path)] == ["a.yaml", "b.yml"]
-    answers = iter(["bad", "0", "3", "2"])
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+
+    def choose(title, labels):
+        assert labels == ["a.yaml", "b.yml"]
+        return 1
+
+    monkeypatch.setattr("abench.discovery.choose", choose)
     assert select_experiment(tmp_path, True) == folder / "b.yml"
-    assert "Enter a number" in capsys.readouterr().out
 
 
-def test_single_file_still_prompts_and_accepts_enter(tmp_path, monkeypatch):
+def test_single_file_still_prompts(tmp_path, monkeypatch):
     folder = instructions(tmp_path)
     (folder / "b.yml").unlink()
     prompts = []
-    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
+    monkeypatch.setattr(
+        "abench.discovery.choose", lambda title, labels: prompts.append(labels) or 0
+    )
     assert select_experiment(tmp_path, True) == folder / "a.yaml"
-    assert len(prompts) == 1
+    assert prompts == [["a.yaml"]]
     assert select_experiment(tmp_path, False) == folder / "a.yaml"
 
 
@@ -44,17 +48,6 @@ def test_noninteractive_multiple_and_missing(tmp_path):
     (folder / "b.yml").unlink()
     with pytest.raises(ValueError, match="No YAML"):
         instruction_files(tmp_path)
-
-
-def test_selection_eof(tmp_path, monkeypatch):
-    instructions(tmp_path)
-
-    def ended(prompt):
-        raise EOFError()
-
-    monkeypatch.setattr("builtins.input", ended)
-    with pytest.raises(ValueError, match="nothing started"):
-        select_experiment(tmp_path, True)
 
 
 def test_directory_help_does_not_prompt_or_parse_suites(tmp_path, monkeypatch, capsys):
@@ -85,7 +78,11 @@ runs:
     households: ${households}
 """)
     prompts = []
-    answers = iter(["2", "42"])
+    answers = iter(["42"])
+    monkeypatch.setattr(
+        "abench.discovery.choose",
+        lambda title, labels: prompts.append("Choose experiment") or 1,
+    )
 
     def respond(prompt):
         prompts.append(prompt)

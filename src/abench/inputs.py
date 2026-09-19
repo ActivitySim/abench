@@ -3,6 +3,8 @@
 import math
 import re
 
+from .menus import choose
+
 TYPES = {
     "string": (str,),
     "integer": (int,),
@@ -169,6 +171,11 @@ def prompt_value(name, spec):
     """Keep asking until the user supplies a valid value or accepts a default."""
     if spec.get("description"):
         print(f"{name}: {spec['description']}", flush=True)
+    if "choices" in spec:
+        options = spec["choices"]
+        default_index = options.index(spec["default"]) if "default" in spec else 0
+        selected = choose(name, [str(value) for value in options], default_index)
+        return check_value(name, spec, options[selected])
     constraints = ", ".join(
         f"{key}: {spec[key]}"
         for key in ("choices", "minimum", "maximum")

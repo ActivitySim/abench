@@ -49,8 +49,8 @@ abench /path/to/model
 
 Abench looks for `.yaml` and `.yml` files directly inside `/path/to/model/.abench/`
 (no recursive search). In a terminal it lists them alphabetically and asks which
-experiment to run, then prompts for that experiment's inputs. Enter chooses the
-first file; a single file still gets a selection prompt. Only the selected file
+experiment to run, then prompts for that experiment's inputs. Use ↑/↓ to move the highlighted selection and Enter to confirm. The first file
+is initially selected; a single file still gets a selection prompt. Only the selected file
 is loaded. `run`, `validate`, and `prepare` all support directory selection.
 
 `abench /path/to/model --help` lists available files without prompting or running
@@ -196,7 +196,10 @@ vars:
 ```
 
 In a terminal, run, validate, and prepare prompt for each input in YAML order.
-Press Enter to accept a displayed default. Required inputs have no default and
+Inputs with `choices` use the same arrow-key menu, with the declared default
+initially highlighted (or the first option if required). Enter confirms the
+selection and preserves its declared type. Other inputs use text prompts.
+Press Enter to accept a displayed default. Required text inputs have no default and
 must be entered; empty or invalid answers prompt again with an explanation.
 Ctrl-C cancels before source resolution or downloads. Selected values are printed
 and saved in `suite.json` as `input_values`.
